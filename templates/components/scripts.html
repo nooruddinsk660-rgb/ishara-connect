@@ -1,0 +1,273 @@
+<script>
+    document.getElementById('start-overlay').addEventListener('click', function () {
+        this.style.display = 'none';
+        // Unlock audio context by playing a silent sound or just resuming
+        const audio = new Audio();
+        audio.play().catch(e => { });
+    });
+
+    // --- Theme Logic ---
+    function toggleTheme() {
+        const body = document.body;
+        const icon = document.getElementById('theme-icon');
+        const isLight = body.getAttribute('data-theme') === 'light';
+
+        if (isLight) {
+            body.removeAttribute('data-theme');
+            icon.classList.remove('fa-moon');
+            icon.classList.add('fa-sun');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            body.setAttribute('data-theme', 'light');
+            icon.classList.remove('fa-sun');
+            icon.classList.add('fa-moon');
+            localStorage.setItem('theme', 'light');
+        }
+    }
+
+    // Apply saved theme on load
+    (function initTheme() {
+        const savedTheme = localStorage.getItem('theme');
+        const icon = document.getElementById('theme-icon');
+        if (savedTheme === 'light') {
+            document.body.setAttribute('data-theme', 'light');
+            if (icon) {
+                icon.classList.remove('fa-sun');
+                icon.classList.add('fa-moon');
+            }
+        }
+    })();
+
+    // Global States
+    let isPoliteMode = false;
+    let isMuted = false;
+    let isCameraOn = true;
+
+    // --- Toggle Logic ---
+    function toggleCamera() {
+        const videoElement = document.getElementById('video_feed');
+        const icon = document.querySelector('#camera-toggle i');
+
+        if (isCameraOn) {
+            // Turn Off
+            videoElement.src = "";
+            videoElement.style.background = "#000"; // Black screen
+            icon.classList.remove('fa-video');
+            icon.classList.add('fa-video-slash');
+            icon.style.color = "#ff4757"; // Red indicator
+            isCameraOn = false;
+        } else {
+            // Turn On
+            videoElement.src = "{{ url_for('video_feed') }}";
+            icon.classList.remove('fa-video-slash');
+            icon.classList.add('fa-video');
+            icon.style.color = ""; // Reset color
+            isCameraOn = true;
+        }
+    }
+
+    function toggleSound() {
+        const icon = document.querySelector('#sound-toggle i');
+
+        if (isMuted) {
+            // Unmute
+            isMuted = false;
+            icon.classList.remove('fa-volume-mute');
+            icon.classList.add('fa-volume-up');
+            icon.style.color = ""; // Reset
+        } else {
+            // Mute
+            isMuted = true;
+            icon.classList.remove('fa-volume-up');
+            icon.classList.add('fa-volume-mute');
+            icon.style.color = "#ff4757"; // Red indicator
+        }
+    }
+
+    // --- Click-to-Speak Logic ---
+    function playGesture(gesture) {
+        // Read UI States
+        const selectedLang = document.getElementById('language-select').value;
+        const isPolite = document.getElementById('polite-toggle').checked;
+
+        // Construct folder name based on state
+        // e.g. "bengali" or "bengali_polite"
+        let folderName = selectedLang;
+        if (isPolite) {
+            folderName += "_polite";
+        }
+
+        // Convert gesture to filename (Clean formatting)
+        // "Thank You" -> "thank_you"
+        let filename = gesture.toLowerCase().replace(/ /g, "_");
+
+        // Polite files also have _polite suffix in filename
+        // e.g. thank_you_polite.mp3
+        if (isPolite) {
+            filename += "_polite";
+        }
+
+        // Construct full path
+        const audioUrl = `/static/audio/${folderName}/${filename}.mp3`;
+
+        console.log(`Playing: ${gesture} from ${audioUrl}`);
+
+        // Play Audio ONLY if not muted
+        if (!isMuted) {
+            const audio = new Audio(audioUrl);
+            audio.play().catch(e => console.error("Audio Playback Error:", e));
+        }
+
+        // Log to Backend (Debug)
+        fetch(`/log_event?msg=Clicked ${gesture}`).catch(e => console.log("Log Error:", e));
+
+        // Visual Feedback (Pop effect)
+        const icon = document.getElementById('icon-' + gesture);
+        if (icon) {
+            icon.classList.add('active');
+            setTimeout(() => icon.classList.remove('active'), 1000); // Remove after 1s
+        }
+    }
+
+    function updateUI() {
+        // Read UI States
+        const selectedLang = document.getElementById('language-select').value;
+        const isPolite = document.getElementById('polite-toggle').checked;
+
+        // Color the container Pink if polite mode is ON
+        const politeWrapper = document.getElementById('polite-wrapper');
+        if (isPolite) politeWrapper.classList.add('active');
+        else politeWrapper.classList.remove('active');
+
+        // Send both Language AND Polite parameters to Python
+        // TODO: optimize this to prevent flood
+        // fetch(`/status?lang=${selectedLang}&polite=${isPolite}`)
+        //     .then(response => response.json())
+        //     .then(data => {
+        //         const predElement = document.getElementById('pred-text');
+        //         const sentElement = document.getElementById('sent-text');
+
+        //         // 1. Update Text
+        //         if (data.prediction && data.prediction !== "Nothing") {
+        //             predElement.innerText = data.prediction;
+        //             sentElement.innerText = data.sentence;
+        //         }
+
+        //         // 2. Highlight Icon
+        //         document.querySelectorAll('.gesture-icon').forEach(el => el.classList.remove('active'));
+
+        //         if (data.prediction && data.prediction !== "Nothing") {
+        //             const activeIcon = document.getElementById('icon-' + data.prediction);
+        //             if (activeIcon) {
+        //                 activeIcon.classList.add('active');
+        //                 activeIcon.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        //             }
+        //         }
+
+        //         // 3. Play Audio
+        //         if (data.new_gesture && data.audio_url) {
+        //             const audio = new Audio(data.audio_url);
+        //             audio.play().catch(e => console.log("Audio Error:", e));
+        //         }
+        //     })
+        //     .catch(err => console.error("Error:", err));
+
+        // Re-enabling the fetch call but with a check or debouncing would be ideal.
+        // For now, restoring original logic:
+        fetch(`/status?lang=${selectedLang}&polite=${isPolite}`)
+            .then(response => response.json())
+            .then(data => {
+                const predElement = document.getElementById('pred-text');
+                const sentElement = document.getElementById('sent-text');
+
+                // 1. Update Text
+                if (data.prediction !== "Nothing") {
+                    predElement.innerText = data.prediction;
+                    sentElement.innerText = data.sentence;
+                }
+
+                // 2. Highlight Icon
+                document.querySelectorAll('.gesture-icon').forEach(el => el.classList.remove('active'));
+
+                if (data.prediction !== "Nothing") {
+                    const activeIcon = document.getElementById('icon-' + data.prediction);
+                    if (activeIcon) {
+                        activeIcon.classList.add('active');
+                        activeIcon.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }
+                }
+
+                // 3. Play Audio
+                if (data.new_gesture && data.audio_url && !isMuted) {
+                    const audio = new Audio(data.audio_url);
+                    audio.play().catch(e => console.log("Audio Error:", e));
+                }
+            })
+            .catch(err => console.error("Error:", err));
+    }
+
+    // --- Listen Feature Logic ---
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Check browser support
+    if (SpeechRecognition) {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = false;
+        recognition.lang = 'bn-IN';
+        recognition.interimResults = false;
+
+        const listenBtn = document.getElementById('listen-btn');
+        const incomingText = document.getElementById('incoming-text');
+        let isListening = false;
+
+        // Ensure elements exist before adding listeners
+        if (listenBtn && incomingText) {
+            window.toggleListening = function () {
+                if (isListening) {
+                    recognition.stop();
+                    isListening = false;
+                    listenBtn.classList.remove('active-mic');
+                    listenBtn.innerHTML = '<i class="fas fa-microphone"></i> &nbsp; Listen to Reply';
+                } else {
+                    incomingText.style.display = 'block';
+                    recognition.start();
+                    isListening = true;
+                    listenBtn.classList.add('active-mic');
+                    listenBtn.innerHTML = '<i class="fas fa-stop-circle"></i> &nbsp; Listening...';
+                    incomingText.innerText = "Listening...";
+                }
+            }
+
+            recognition.onresult = (event) => {
+                const speechResult = event.results[0][0].transcript;
+                incomingText.innerText = "They said: " + speechResult;
+                isListening = false;
+                listenBtn.classList.remove('active-mic');
+                listenBtn.innerHTML = '<i class="fas fa-microphone"></i> &nbsp; Listen Again';
+            };
+
+            recognition.onerror = (event) => {
+                incomingText.innerText = "Error: " + event.error;
+                isListening = false;
+                listenBtn.classList.remove('active-mic');
+                listenBtn.innerHTML = '<i class="fas fa-microphone"></i> &nbsp; Retry';
+            };
+        }
+    } else {
+        console.warn("Speech Recognition not supported in this browser.");
+    }
+
+    // --- Flashlight Logic ---
+    function toggleFlashlight() {
+        const overlay = document.getElementById('flashlight-overlay');
+        if (overlay) {
+            if (overlay.style.display === 'block') {
+                overlay.style.display = 'none';
+            } else {
+                overlay.style.display = 'block';
+            }
+        }
+    }
+
+    // Fast Polling for smoothness
+    setInterval(updateUI, 100);
+</script>

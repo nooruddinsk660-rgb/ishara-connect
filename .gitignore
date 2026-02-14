@@ -1,0 +1,22 @@
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+site_packages/
+
+# Data & Models (Large Files)
+model.p
+data.csv
+
+# OS generated files
+Thumbs.db
+Desktop.ini
+
+# IDEs
+.vscode/
+.idea/

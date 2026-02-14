@@ -1,0 +1,19 @@
+<div class="main-container">
+    <div class="video-card">
+        <img id="video_feed" src="{{ url_for('video_feed') }}" alt="Webcam Feed">
+    </div>
+
+    <div class="info-card">
+        <div class="label-small">Detected Gesture</div>
+        <div id="pred-text">...</div>
+        <div id="sent-text">Waiting for sign...</div>
+
+        <!-- Listen Feature -->
+        <div class="listen-container">
+            <button id="listen-btn" class="neumorphic-btn" onclick="toggleListening()">
+                <i class="fas fa-microphone"></i> &nbsp; Listen to Reply
+            </button>
+            <div id="incoming-text" class="incoming-text">Waiting for reply...</div>
+        </div>
+    </div>
+</div>
