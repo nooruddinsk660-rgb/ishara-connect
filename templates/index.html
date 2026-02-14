@@ -24,8 +24,9 @@
     {% include 'components/header.html' %}
 
     <!-- Flashlight Overlay -->
-    <div id="flashlight-overlay">
-        <button id="flashlight-btn" onclick="toggleFlashlight()">OFF</button>
+    <div id="flashlight-overlay" onclick="toggleFlashlight()">
+        <i class="fas fa-bolt" style="font-size: 5rem; color: #333; margin-bottom: 20px;"></i>
+        <button id="flashlight-btn">TAP TO TURN OFF</button>
     </div>
 
     {% include 'components/camera.html' %}

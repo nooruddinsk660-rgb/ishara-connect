@@ -3,7 +3,6 @@
 
 **Ishara Connect** is an advanced, real-time sign language interpretation system powered by AI and Computer Vision. It translates hand gestures into spoken language (Bengali, Hindi, English) to bridge the communication gap for the deaf and mute community.
 
-![Project Banner](static/images/banner.png) *Add a screenshot or banner here*
 
 ## 🌟 Key Features
 

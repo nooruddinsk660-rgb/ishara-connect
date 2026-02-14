@@ -82,11 +82,19 @@ async def generate_for_map(map_data, voice, folder_name):
         if not text: continue
         
         # Consistent Filename: "Please" -> "please.mp3"
-        filename = f"{gesture.lower().replace(' ', '_')}.mp3"
+        filename_base = gesture.lower().replace(' ', '_')
+        if folder_name.endswith('_polite'):
+             filename_base += "_polite"
+        
+        filename = f"{filename_base}.mp3"
         filepath = os.path.join(target_dir, filename)
         
         # print(f"Generating: {gesture} -> {filepath}")
         
+        if os.path.exists(filepath):
+            print(f"Skipping (Exists): {filename}")
+            continue
+            
         try:
             communicate = edge_tts.Communicate(text, voice, rate=RATE, pitch=PITCH)
             await communicate.save(filepath)
