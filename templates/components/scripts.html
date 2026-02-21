@@ -11,6 +11,9 @@
     let lastPlayedAudioUrl = "";
     let selectedLang = 'english';
     let socket = null;
+    let localStream = null;
+    let cameraInterval = null;
+    let isFrameProcessing = false;
 
     // --- Audio Manager ---
     const AppManager = {
@@ -39,22 +42,24 @@
             console.log("🔊 Playing audio:", url);
             this.isAudioPlaying = true;
 
-            if (isListening && recognition) {
+            // Stop Mic if it's running to avoid self-loop
+            if (SpeechManager.isListening) {
                 this.wasMicActiveBeforeAudio = true;
-                recognition.stop();
+                SpeechManager.stopListening();
             }
 
-            // Use cached audio if available, else new
-            // Note: reusing Audio objects can be tricky with parallel requests, 
-            // but for single user it's fine. For safety, new Audio is robust.
             const audio = new Audio(url);
 
             audio.onended = () => {
                 this.isAudioPlaying = false;
                 lastPlayedAudioUrl = "";
-                if (this.wasMicActiveBeforeAudio && !isListening) {
+                // Auto-resume mic if it was active?
+                // UX Decision: Typically users want to reply after hearing, so manual toggle is safer 
+                // to avoid picking up echo, but we can auto-resume if desired. 
+                // For now, let's keep it manual or auto-resume with delay.
+                if (this.wasMicActiveBeforeAudio) {
                     this.wasMicActiveBeforeAudio = false;
-                    setTimeout(toggleListening, 100); // Small delay to clear buffer
+                    // setTimeout(() => SpeechManager.startListening(), 500); // Optional Auto-Resume
                 }
             };
 
@@ -70,8 +75,176 @@
         }
     };
 
+    // --- Speech Recognition Manager (World Class Refactor) ---
+    const SpeechManager = {
+        recognition: null,
+        isListening: false,
+        finalTranscript: '',
+
+        init: function () {
+            if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                this.recognition = new SpeechRecognition();
+                this.recognition.continuous = false; // We want single command/sentence flow
+                this.recognition.interimResults = true; // Show text AS you speak
+                this.recognition.maxAlternatives = 1;
+
+                this.setupListeners();
+            } else {
+                console.error("❌ Speech Recognition Not Supported in this Browser.");
+                alert("Speech Recognition is not supported in this browser. Please use Chrome.");
+                const btn = document.getElementById('listen-btn');
+                if (btn) btn.style.display = 'none';
+            }
+        },
+
+        setupListeners: function () {
+            if (!this.recognition) return;
+
+            this.recognition.onstart = () => {
+                this.isListening = true;
+                this.updateUI(true);
+                console.log("🎤 Mic Started");
+            };
+
+            this.recognition.onend = () => {
+                this.isListening = false;
+                this.updateUI(false);
+                console.log("🎤 Mic Stopped");
+
+                // If we have a final transcript, we can "process" it here if needed
+                if (this.finalTranscript.trim() !== '') {
+                    setTimeout(() => {
+                        this.toggleOverlay(false);
+                    }, 1500);
+                } else {
+                    this.toggleOverlay(false);
+                    const incomingDisplay = document.getElementById('incoming-text');
+                    if (incomingDisplay) incomingDisplay.style.display = 'none';
+                }
+            };
+
+            this.recognition.onresult = (event) => {
+                let interimTranscript = '';
+                this.finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        this.finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                // Update Overlay Text
+                const transcriptDisplay = document.getElementById('active-transcript');
+                if (transcriptDisplay) {
+                    transcriptDisplay.innerHTML = `
+                        <span style="color:white;">${this.finalTranscript}</span>
+                        <span style="color:rgba(255,255,255,0.6);">${interimTranscript}</span>
+                    `;
+                }
+
+                // Update original Dashboard Text 
+                const incomingDisplay = document.getElementById('incoming-text');
+                if (incomingDisplay) {
+                    incomingDisplay.style.setProperty('display', 'block', 'important');
+                    incomingDisplay.innerText = this.finalTranscript || interimTranscript;
+                }
+
+                console.log("🗣️ Speech:", this.finalTranscript || interimTranscript);
+            };
+
+            this.recognition.onerror = (event) => {
+                console.error("❌ Speech Error:", event.error);
+                let msg = "Error occurred";
+                if (event.error === 'no-speech') msg = "No speech detected. Try again.";
+                if (event.error === 'network') msg = "Network error. Check connection.";
+                if (event.error === 'not-allowed') msg = "Microphone access denied.";
+
+                const title = document.getElementById('listening-title');
+                if (title) title.innerText = msg;
+
+                // Keep overlay for a moment to show error
+                setTimeout(() => {
+                    if (this.isListening) this.stopListening();
+                    this.toggleOverlay(false);
+                }, 2000);
+            };
+        },
+
+        startListening: function () {
+            if (!this.recognition) return;
+            if (this.isListening) return;
+
+            this.finalTranscript = ''; // Reset
+
+            // Set Language Logic
+            let micLang = 'en-US';
+            if (selectedLang === 'hindi') micLang = 'hi-IN';
+            if (selectedLang === 'bengali') micLang = 'bn-IN';
+            this.recognition.lang = micLang;
+            console.log("🌐 Setting Mic Language to:", micLang);
+
+            // Update user hint logic based on Polite Mode? -> No, standard recognition is fine.
+            // Polite mode affects OUTPUT, not input recognition usually.
+
+            this.toggleOverlay(true);
+            try {
+                this.recognition.start();
+            } catch (e) { console.error(e); }
+        },
+
+        stopListening: function () {
+            if (!this.recognition) return;
+            this.recognition.stop();
+        },
+
+        toggleListening: function () {
+            if (this.isListening) {
+                this.stopListening();
+            } else {
+                this.startListening();
+            }
+        },
+
+        toggleOverlay: function (show) {
+            const overlay = document.getElementById('listening-overlay');
+            const title = document.getElementById('listening-title');
+            const transcript = document.getElementById('active-transcript');
+
+            if (overlay) {
+                if (show) {
+                    overlay.classList.add('active');
+                    if (title) title.innerText = "Listening...";
+                    if (transcript) transcript.innerText = "";
+                } else {
+                    overlay.classList.remove('active');
+                }
+            }
+        },
+
+        updateUI: function (active) {
+            const listenBtn = document.getElementById('listen-btn');
+            if (listenBtn) {
+                if (active) {
+                    listenBtn.classList.add('listening');
+                    listenBtn.innerHTML = '<i class="fas fa-wave-square"></i> &nbsp; Listening...';
+                } else {
+                    listenBtn.classList.remove('listening');
+                    listenBtn.innerHTML = '<i class="fas fa-microphone"></i> &nbsp; Listen to Reply';
+                }
+            }
+        }
+    };
+
+
     // --- INIT ---
     document.addEventListener('DOMContentLoaded', () => {
+        // 0. Sync Language State
+        const langSelect = document.getElementById('language-select');
+        if (langSelect) selectedLang = langSelect.value;
+
         // 1. Socket Init
         socket = io();
 
@@ -105,6 +278,15 @@
             if (data.audio_url) AppManager.playAudio(data.audio_url);
         });
 
+        // Backend returning drawn frames
+        socket.on('processed_frame', (data) => {
+            isFrameProcessing = false;
+            if (isCameraOn) {
+                const img = document.getElementById('video_feed');
+                if (img) img.src = data;
+            }
+        });
+
         // 2. Preload
         AppManager.preloadAudio();
 
@@ -116,21 +298,28 @@
         if (savedTheme === 'light') {
             toggleTheme(false); // Apply light without toggling
         }
+
+        // 5. Init Speech
+        SpeechManager.init();
     });
 
     function checkPermissions() {
-        navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        // Explicitly request front-facing camera on mobile. 
+        // Do NOT request audio here! The Web Speech API needs exclusive access to the mic on mobile.
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
             .then(stream => {
-                // Permission Granted
-                console.log("✅ Camera & Mic Access Granted");
-                // Stop tracks immediately, we just wanted to check permission
-                // The video element uses its own stream via Python backend usually, 
-                // but this ensures the BROWSER permission is "Ask" or "Allow".
-                stream.getTracks().forEach(track => track.stop());
+                console.log("✅ Camera Access Granted (Mic will be requested on-demand)");
+                localStream = stream;
+                const localVideo = document.getElementById('local_video');
+                if (localVideo) {
+                    localVideo.srcObject = stream;
+                    localVideo.play();
+                }
+
+                startFrameStreaming();
             })
             .catch(err => {
                 console.error("❌ Permission Denied:", err);
-                // Create Overlay
                 const overlay = document.createElement('div');
                 overlay.innerHTML = `
                 <div style="position:fixed;top:0;left:0;width:100%;height:100%;
@@ -139,16 +328,38 @@
                             text-align:center;color:white;padding:20px;">
                     <i class="fas fa-lock" style="font-size:4rem;color:#ff4757;margin-bottom:20px;"></i>
                     <h1>Camera/Mic Access Blocked</h1>
-                    <p style="font-size:1.2rem;margin-bottom:20px;">Please allow camera and microphone access in your browser settings to use Ishara Connect.</p>
+                    <p style="font-size:1.2rem;margin-bottom:20px;">Please allow camera and microphone access.</p>
                     <button onclick="location.reload()" 
                             style="padding:10px 30px;font-size:1.2rem;border:none;border-radius:50px;
-                                   background:var(--primary);color:white;cursor:pointer;">
+                                   background:var(--accent-primary);color:white;cursor:pointer;">
                         Try Again
                     </button>
                 </div>
             `;
                 document.body.appendChild(overlay);
             });
+    }
+
+    function startFrameStreaming() {
+        const localVideo = document.getElementById('local_video');
+        const hiddenCanvas = document.getElementById('hidden_canvas');
+        if (!localVideo || !hiddenCanvas) return;
+
+        const context = hiddenCanvas.getContext('2d');
+
+        // Process frames carefully to avoid network congestion
+        cameraInterval = setInterval(() => {
+            if (isCameraOn && socket && socket.connected && localVideo.readyState >= 2 && !isFrameProcessing) {
+                isFrameProcessing = true;
+                hiddenCanvas.width = localVideo.videoWidth;
+                hiddenCanvas.height = localVideo.videoHeight;
+                context.drawImage(localVideo, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
+
+                // Compress highly: speed > quality for ML coordinates
+                const dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.5);
+                socket.emit('video_frame', dataURL);
+            }
+        }, 80); // Send next frame roughly ~12fps max
     }
 
     function emitSettings() {
@@ -158,50 +369,62 @@
     }
 
     // --- UI Logic ---
-
     // Start Overlay Unlock
     document.getElementById('start-overlay')?.addEventListener('click', function () {
         this.style.display = 'none';
         new Audio().play().catch(e => { }); // Unlock Audio Context
     });
 
-    // Language Change
-    document.getElementById('language-select')?.addEventListener('change', (e) => {
-        selectedLang = e.target.value;
+    // 1. Language Change (Refined with Pulse Animation)
+    function onLanguageChange(select) {
+        selectedLang = select.value;
         emitSettings();
 
-        // Restart mic if active to pick up new language
-        if (isListening && recognition) {
-            recognition.stop();
-            // It will auto-restart via 'end' event if we wanted continuous, 
-            // but our current logic is toggle-based.
-            // Let's stop it properly.
-        }
-    });
+        // Visual Pulse Effect
+        select.classList.add('language-pulse');
+        setTimeout(() => select.classList.remove('language-pulse'), 500);
 
-    // Polite Toggle
+        // Toast Notification (Optional but good for feedback)
+        // console.log("🌐 Language Switched to:", selectedLang);
+
+        // If listening, restart to apply new language
+        if (SpeechManager.isListening) {
+            SpeechManager.stopListening();
+            setTimeout(() => SpeechManager.startListening(), 500);
+        }
+    }
+    document.getElementById('language-select')?.addEventListener('change', (e) => onLanguageChange(e.target));
+
+
+    // 2. Polite Toggle (Refined with Golden Glow)
     function togglePolite() {
         const checkbox = document.getElementById('polite-toggle');
         if (checkbox) {
             isPoliteMode = checkbox.checked;
             const wrapper = document.getElementById('polite-wrapper');
-            if (wrapper) isPoliteMode ? wrapper.classList.add('active') : wrapper.classList.remove('active');
+
+            if (wrapper) {
+                if (isPoliteMode) {
+                    wrapper.classList.add('active');
+                    // Add a temporary scale bump
+                    wrapper.style.transform = "scale(1.1)";
+                    setTimeout(() => wrapper.style.transform = "scale(1.02)", 200);
+                } else {
+                    wrapper.classList.remove('active');
+                    wrapper.style.transform = "scale(1)";
+                }
+            }
             emitSettings();
         }
     }
 
-    // Theme Toggle
+    // 3. Theme Toggle
     function toggleTheme(doToggle = true) {
         const body = document.body;
         const icon = document.getElementById('theme-icon');
-
-        // If doToggle is false, just apply current state logic (used for init)
-        // But here we simplify: check attribute first
         let isLight = body.getAttribute('data-theme') === 'light';
 
-        if (doToggle) {
-            isLight = !isLight;
-        }
+        if (doToggle) isLight = !isLight;
 
         if (isLight) {
             body.setAttribute('data-theme', 'light');
@@ -214,66 +437,53 @@
         }
     }
 
+    // 4. Camera Toggle
     function toggleCamera() {
-        // App.py uses 'video_feed' as the route, and camera.html uses 'video_feed' as the ID.
-        // Previously we were looking for 'video-feed'. Correcting to 'video_feed'.
-        const videoElement = document.getElementById('video_feed');
         const btn = document.getElementById('camera-toggle');
         const icon = btn ? btn.querySelector('i') : null;
-
-        console.log("Toggle Camera Clicked. Current state:", isCameraOn);
-
         isCameraOn = !isCameraOn;
 
         if (isCameraOn) {
-            // Turn On
-            if (videoElement) {
-                // Use '/video_feed' directly or template
-                videoElement.src = "/video_feed"; // Using path is simpler if url_for not parsed in JS
-                videoElement.style.opacity = "1";
-            }
             if (icon) {
                 icon.classList.remove('fa-video-slash');
                 icon.classList.add('fa-video');
-                btn.classList.remove('bg-red-500');
+                btn.classList.remove('is-off');
             }
         } else {
-            // Turn Off
-            if (videoElement) {
-                videoElement.style.opacity = "0";
-                setTimeout(() => { videoElement.src = ""; }, 500); // Disconnect after fade
+            const videoFeed = document.getElementById('video_feed');
+            if (videoFeed) {
+                videoFeed.style.opacity = "0";
+                setTimeout(() => { videoFeed.src = ""; }, 300);
             }
             if (icon) {
                 icon.classList.remove('fa-video');
                 icon.classList.add('fa-video-slash');
-                btn.classList.add('bg-red-500');
+                btn.classList.add('is-off');
             }
         }
     }
 
+    // 5. Sound Toggle
     function toggleSound() {
         const btn = document.getElementById('sound-toggle');
         const icon = btn ? btn.querySelector('i') : null;
-
-        console.log("Toggle Sound Clicked. Current Muted state:", isMuted);
-
         isMuted = !isMuted;
-
         if (isMuted) {
             if (icon) {
                 icon.classList.remove('fa-volume-up');
                 icon.classList.add('fa-volume-mute');
-                btn.classList.add('bg-red-500');
+                btn.classList.add('is-off');
             }
         } else {
             if (icon) {
                 icon.classList.remove('fa-volume-mute');
                 icon.classList.add('fa-volume-up');
-                btn.classList.remove('bg-red-500');
+                btn.classList.remove('is-off');
             }
         }
     }
 
+    // 6. Flashlight Toggle
     function toggleFlashlight() {
         const overlay = document.getElementById('flashlight-overlay');
         if (overlay) {
@@ -282,64 +492,21 @@
         fetch('/log_event?msg=FlashlightToggled');
     }
 
-    // --- Speech Recognition ---
-    let isListening = false;
-    let recognition = null;
-    let isMicInitializing = false;
-
-    if ('webkitSpeechRecognition' in window) {
-        recognition = new webkitSpeechRecognition();
-        recognition.continuous = false;
-        recognition.interimResults = false;
-
-        recognition.onstart = function () {
-            isListening = true;
-            updateMicButtonUI(true);
-        };
-
-        recognition.onend = function () {
-            isListening = false;
-            updateMicButtonUI(false);
-            isMicInitializing = false;
-        };
-
-        recognition.onresult = function (event) {
-            const transcript = event.results[0][0].transcript;
-            console.log("🎤 Mic:", transcript);
-            const incomingText = document.getElementById('incoming-text');
-            if (incomingText) {
-                incomingText.style.display = 'block';
-                incomingText.innerText = `> ${transcript}`;
-                setTimeout(() => { incomingText.style.display = 'none'; }, 5000);
-            }
-        };
-
-        recognition.onerror = function (event) {
-            console.error("Mic Error:", event.error);
-            isListening = false;
-            updateMicButtonUI(false);
-            isMicInitializing = false;
-        };
-    } else {
-        console.warn("Speech Recognition Not Supported");
-        const btn = document.getElementById('mic-btn'); // Assuming ID is mic-btn based on previous context
-        if (btn) btn.style.display = 'none';
+    // 7. Toggle Listening (Main Function)
+    function toggleListening() {
+        SpeechManager.toggleListening();
     }
 
+    // 8. Play Gesture (Manual)
     function playGesture(gestureName) {
-        // Re-fetch language from DOM to be sure
         const langSelect = document.getElementById('language-select');
-        if (langSelect) {
-            selectedLang = langSelect.value;
-        }
+        if (langSelect) selectedLang = langSelect.value;
 
         console.log("👆 Manual Gesture Click:", gestureName, "Lang:", selectedLang);
 
         let folder = selectedLang;
-        // Basic filename: water -> water.mp3
         let filename = gestureName.toLowerCase().replace(/ /g, '_');
 
-        // Handle Polite Mode
         if (isPoliteMode) {
             folder += '_polite';
             filename += '_polite';
@@ -355,67 +522,7 @@
             icon.classList.add('active');
             setTimeout(() => icon.classList.remove('active'), 1000);
         }
-
-        // Update Text UI
         const predText = document.getElementById('pred-text');
         if (predText) predText.innerText = gestureName;
-
-        // Also update sentence if available? 
-        // We'd need the map, but for now just the gesture name is good feedback.
-    }
-
-    function toggleListening() {
-        if (!recognition) {
-            alert("Upgrade your browser to use Speech Recognition.");
-            return;
-        }
-        if (isMicInitializing) return;
-
-        if (isListening) {
-            recognition.stop();
-        } else {
-            isMicInitializing = true;
-
-            // Re-fetch language from DOM to be sure
-            const langSelect = document.getElementById('language-select');
-            if (langSelect) {
-                selectedLang = langSelect.value;
-            }
-            console.log("🗣️ Starting Mic for language:", selectedLang);
-
-            // Set language dynamically
-            let micLang = 'en-US';
-            if (selectedLang === 'hindi') micLang = 'hi-IN';
-            if (selectedLang === 'bengali') micLang = 'bn-IN';
-
-            recognition.lang = micLang;
-            console.log("🎤 Mic Language Code:", micLang);
-
-            try {
-                recognition.start();
-            } catch (e) {
-                console.error(e);
-                isMicInitializing = false;
-            }
-        }
-    }
-
-    function updateMicButtonUI(active) {
-        const btn = document.getElementById('mic-btn'); // Renamed ID check from listen-btn to mic-btn or vice versa? 
-        // Index.html might have 'listen-btn'. Let's support both or check. 
-        // Previous script had 'listen-btn' in some parts and 'mic-btn' in others.
-        // I will target 'listen-btn' which seems to be the main one from previous logs ("Listen Again" text).
-        // WAIT, the user replaced logic used 'mic-btn' in my previous tool call but 'listen-btn' in the user's edit.
-        // I will use 'listen-btn' as the primary ID to be safe with existing HTML.
-        const listenBtn = document.getElementById('listen-btn');
-        if (listenBtn) {
-            if (active) {
-                listenBtn.classList.add('listening');
-                listenBtn.innerHTML = '<i class="fas fa-wave-square"></i> &nbsp; Listening...';
-            } else {
-                listenBtn.classList.remove('listening');
-                listenBtn.innerHTML = '<i class="fas fa-microphone"></i> &nbsp; Listen to Reply';
-            }
-        }
     }
 </script>

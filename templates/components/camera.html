@@ -1,6 +1,11 @@
 <div class="main-container">
     <div class="video-card">
-        <img id="video_feed" src="{{ url_for('video_feed') }}" alt="Webcam Feed">
+        <!-- Captures local device camera, stays hidden -->
+        <video id="local_video" autoplay playsinline muted style="display:none;"></video>
+        <!-- Canvas used to encode frame to base64 -->
+        <canvas id="hidden_canvas" style="display:none;"></canvas>
+        <!-- Displays the ML processed stream emitted from Flask -->
+        <img id="video_feed" src="" alt="Webcam Feed">
     </div>
 
     <div class="info-card">
@@ -13,7 +18,8 @@
             <button id="listen-btn" class="neumorphic-btn" onclick="toggleListening()">
                 <i class="fas fa-microphone"></i> &nbsp; Listen to Reply
             </button>
-            <div id="incoming-text" class="incoming-text">Waiting for reply...</div>
         </div>
+
+        <div id="incoming-text" class="incoming-text">Waiting for reply...</div>
     </div>
 </div>

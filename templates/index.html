@@ -15,10 +15,27 @@
 <body>
 
     <div id="start-overlay"
-        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; display: flex; justify-content: center; align-items: center; color: white; flex-direction: column; cursor: pointer;">
-        <i class="fas fa-play-circle" style="font-size: 5rem; margin-bottom: 20px; color: var(--primary);"></i>
-        <h1 style="font-size: 2.5rem;">Click Anywhere to Enable Audio</h1>
-        <p>Browser policy requires interaction to play sound.</p>
+        style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg-gradient); backdrop-filter: blur(20px); z-index: 9999; display: flex; justify-content: center; align-items: center; color: var(--text-main); flex-direction: column; cursor: pointer; text-align: center; padding: 20px; box-sizing: border-box;">
+        <i class="fas fa-play-circle"
+            style="font-size: 5rem; margin-bottom: 20px; color: var(--accent-primary); filter: drop-shadow(0 0 15px var(--accent-glow));"></i>
+        <h1 style="font-size: 2.5rem; margin-bottom: 10px;">Click to Start Ishara Connect</h1>
+        <p style="color: var(--text-muted); font-size: 1.1rem;">Enable audio and immerse yourself in the experience.</p>
+    </div>
+
+    <!-- Siri-style Voice Interpretation Overlay -->
+    <div id="listening-overlay">
+        <div class="listening-content">
+            <div class="listening-title" id="listening-title">Listening...</div>
+            <div class="waveform-container">
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+                <div class="wave-bar"></div>
+            </div>
+            <div id="active-transcript" class="listening-transcript"></div>
+        </div>
     </div>
 
     {% include 'components/header.html' %}

@@ -1,3 +1,4 @@
+import base64
 from flask import Flask, render_template, Response, jsonify, request
 from flask_socketio import SocketIO, emit
 import cv2
@@ -246,6 +247,101 @@ def handle_settings(data):
     current_lang = data.get('lang', 'bengali')
     is_polite_mode = data.get('polite', False)
     print(f"⚙️ Settings Updated: {current_lang}, Polite: {is_polite_mode}")
+
+# Create a global hands model configured for rapid websocket queries
+socket_hands = mp_hands.Hands(
+    static_image_mode=True,
+    model_complexity=0,
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5,
+    max_num_hands=2
+)
+mp_lock = threading.Lock()
+
+@socketio.on('video_frame')
+def handle_video_frame(data):
+    global current_prediction, last_sent_prediction, last_audio_time
+    try:
+        if ',' in data:
+            data = data.split(',')[1]
+        
+        image_data = base64.b64decode(data)
+        nparr = np.frombuffer(image_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        frame = cv2.flip(frame, 1)
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        
+        with mp_lock:
+            results = socket_hands.process(frame_rgb)
+        
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                try:
+                    draw_robotic_hands(frame, hand_landmarks)
+                except Exception:
+                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                    
+        raw_prediction = "Nothing"
+        if results.multi_hand_landmarks and model is not None:
+            try:
+                data_aux = extract_keypoints(results)
+                prediction_result = model.predict([data_aux])[0]
+                
+                if isinstance(prediction_result, str):
+                    raw_prediction = "Nothing" if prediction_result.lower() == "bus" else prediction_result
+                else:
+                    prediction_index = int(prediction_result)
+                    if 0 <= prediction_index < len(CLASSES):
+                        raw_prediction = CLASSES[prediction_index]
+            except Exception as e:
+                pass
+                
+        prediction_buffer.append(raw_prediction)
+        
+        if len(prediction_buffer) == PREDICTION_BUFFER_SIZE:
+            if len(set(prediction_buffer)) == 1: 
+                new_pred = prediction_buffer[0]
+                with state_lock:
+                    if current_prediction != new_pred:
+                        current_prediction = new_pred
+                        active_map, _ = get_active_map()
+                        sentence = active_map.get(current_prediction, "")
+                        emit('prediction_update', {
+                            'prediction': current_prediction,
+                            'sentence': sentence
+                        })
+                        
+        current_time = time.time()
+        if current_prediction != "Nothing":
+            if current_prediction != last_sent_prediction or (current_time - last_audio_time) > AUDIO_COOLDOWN:
+                last_sent_prediction = current_prediction
+                last_audio_time = current_time
+                
+                folder_name = f"{current_lang}_polite" if is_polite_mode else current_lang
+                filename = current_prediction.lower().replace(" ", "_")
+                if is_polite_mode:
+                    filename += "_polite"
+                
+                relative_path = f"static/audio/{folder_name}/{filename}.mp3"
+                full_path = os.path.join(os.getcwd(), relative_path)
+                url = "/" + relative_path
+                
+                if os.path.exists(full_path):
+                    emit('play_audio', {'audio_url': url})
+                else:
+                    active_map, lang_code = get_active_map()
+                    text = active_map.get(current_prediction, "")
+                    threading.Thread(target=generate_audio_background, args=(text, lang_code, full_path, url)).start()
+        else:
+            last_sent_prediction = "Nothing"
+            
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50]) 
+        frame_bytes = base64.b64encode(buffer).decode('utf-8')
+        emit('processed_frame', 'data:image/jpeg;base64,' + frame_bytes)
+        
+    except Exception as e:
+        print(f"Error processing socket frame: {e}")
 
 @app.route('/')
 def index():
