@@ -8,6 +8,7 @@ import numpy as np
 import pickle
 import os
 import collections
+import json
 import sys
 import threading
 from utils import extract_keypoints
@@ -25,7 +26,7 @@ except ImportError:
         pass
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'secret!'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32))
 socketio = SocketIO(app, cors_allowed_origins="*")
 
 # --- CONFIGURATION ---
@@ -46,16 +47,10 @@ CONFIDENCE_THRESHOLD = 0.5
 
 # --- GLOBAL STATE & LOCKS ---
 state_lock = threading.Lock()
-prediction_buffer = collections.deque(maxlen=PREDICTION_BUFFER_SIZE)
-current_prediction = "Nothing"
-last_sent_prediction = "Nothing"
-last_audio_time = 0
-last_heartbeat_time = time.time()
 model = None
 
-# Track client preferences (simplified global for single-user/kiosk assumption)
-current_lang = 'bengali'
-is_polite_mode = False
+# Store state per socket session ID
+user_sessions = {}
 
 # --- LOAD MODEL (Robustly) ---
 try:
@@ -66,14 +61,15 @@ try:
 except Exception as e:
     print(f"❌ Error loading model: {e}")
 
-# --- DICTIONARIES ---
-BENGALI_MAP = {"Nothing": "", "Hello": "নমস্কার", "Thank You": "ধন্যবাদ", "Good": "খুব ভালো", "Bad": "খারাপ", "Yes": "হ্যাঁ", "Water": "আমার জল লাগবে", "Food": "আমার খাবার লাগবে", "Toilet": "আমি টয়লেটে যাবো", "Medicine": "আমার ওষুধ লাগবে", "Money": "আমার টাকা লাগবে", "Help": "সাহায্য করুন", "Pain": "আমার ব্যথা করছে", "Call Doctor": "ডাক্তার ডাকুন", "Police": "পুলিশ ডাকুন", "Home": "আমি বাড়ি যাবো", "What": "কী?", "Where": "কোথায়?", "Time": "কটা বাজে?", "I Love You": "আমি তোমাকে ভালোবাসি", "Stop": "থামুন", "No": "না", "Please": "দয়া করে", "Sorry": "ক্ষমা করুন", "Friend": "বন্ধু", "Mother": "মা", "Book": "বই", "Tea": "আমি চা খাবো", "Name": "আমার নাম", "Happy": "আমি খুব খুশি"}
-HINDI_MAP = {"Nothing": "", "Hello": "नमस्ते", "Thank You": "धन्यवाद", "Good": "बहुत अच्छा", "Bad": "खराब", "Yes": "हाँ", "Water": "मुझे पानी चाहिए", "Food": "मुझे खाना चाहिए", "Toilet": "मुझे वॉशरूम जाना है", "Medicine": "मुझे दवाई चाहिए", "Money": "मुझे पैसे चाहिए", "Help": "मेरी मदद करें", "Pain": "मुझे दर्द हो रहा है", "Call Doctor": "डॉक्टर को बुलाओ", "Police": "पुलिस को बुलाओ", "Home": "मुझे घर जाना है", "What": "क्या?", "Where": "कहाँ?", "Time": "समय क्या हुआ है?", "I Love You": "मैं तुमसे प्यार करता हूँ", "Stop": "रुकिए", "No": "नहीं", "Please": "कृपया", "Sorry": "माफ़ करें", "Friend": "दोस्त", "Mother": "माँ", "Book": "किताब", "Tea": "मुझे चाय चाहिए", "Name": "मेरा नाम", "Happy": "मैं बहुत खुश हूँ"}
-ENGLISH_MAP = {"Nothing": "", "Hello": "Hello", "Thank You": "Thank you", "Good": "Good", "Bad": "Bad", "Yes": "Yes", "Water": "I need water", "Food": "I need food", "Toilet": "I need the washroom", "Medicine": "I need medicine", "Money": "I need money", "Help": "Help me", "Pain": "I am in pain", "Call Doctor": "Call a doctor", "Police": "Call the police", "Home": "I want to go home", "What": "What?", "Where": "Where?", "Time": "What time is it?", "I Love You": "I love you", "Stop": "Stop", "No": "No", "Please": "Please", "Sorry": "Sorry", "Friend": "Friend", "Mother": "Mother", "Book": "Book", "Tea": "I want tea", "Name": "My name is", "Happy": "I am happy"}
-
-BENGALI_POLITE_MAP = {"Nothing": "", "Hello": "আপনাকে নমস্কার", "Thank You": "আপনাকে অনেক ধন্যবাদ", "Good": "এটি খুব ভালো", "Bad": "এটি ঠিক নয়", "Yes": "আজ্ঞে হ্যাঁ", "Water": "দয়া করে আমাকে একটু জল দেবেন?", "Food": "দয়া করে আমাকে একটু খাবার দেবেন?", "Toilet": "শৌচালয়টি কোনদিকে বলতে পারবেন?", "Medicine": "আমার একটু ওষুধের প্রয়োজন ছিল", "Money": "আমার কিছু টাকার প্রয়োজন ছিল", "Help": "ক্ষমা করবেন, আমাকে একটু সাহায্য করতে পারবেন?", "Pain": "আমার শরীরে খুব ব্যথা করছে", "Call Doctor": "দয়া করে একজন ডাক্তার ডেকে দিন", "Police": "অনুগ্রহ করে পুলিশকে খবর দিন", "Home": "আমি বাড়ি ফিরে যেতে চাই", "What": "এটি কী বলতে পারবেন?", "Where": "এটি কোথায় বলতে পারবেন?", "Time": "দয়া করে কটা বাজে বলবেন?", "I Love You": "আমি আপনাকে শ্রদ্ধা করি", "Stop": "দয়া করে এবার থামুন", "No": "আজ্ঞে না", "Please": "অনুগ্রহ করে", "Sorry": "দয়া করে আমাকে ক্ষমা করবেন", "Friend": "আপনি আমার বন্ধু", "Mother": "মা", "Book": "আমি বইটি পড়তে চাই", "Tea": "দয়া করে আমাকে এক কাপ চা দেবেন?", "Name": "আমার নাম হলো", "Happy": "আমি আজ অত্যন্ত আনন্দিত"}
-HINDI_POLITE_MAP = {"Nothing": "", "Hello": "आपको नमस्कार", "Thank You": "आपका बहुत बहुत धन्यवाद", "Good": "यह बहुत अच्छा है", "Bad": "यह ठीक नहीं है", "Yes": "जी हाँ", "Water": "क्या मुझे कृपया थोड़ा पानी मिल सकता है?", "Food": "क्या मुझे कृपया थोड़ा खाना मिल सकता है?", "Toilet": "क्षमा करें, वॉशरूम किस तरफ है?", "Medicine": "मुझे कुछ दवाइयों की आवश्यकता है", "Money": "मुझे कुछ पैसों की आवश्यकता है", "Help": "माफ़ कीजिए, क्या आप मेरी मदद कर सकते हैं?", "Pain": "मुझे बहुत दर्द महसूस हो रहा है", "Call Doctor": "कृपया एक डॉक्टर को बुला दीजिए", "Police": "कृपया पुलिस को सूचित करें", "Home": "मैं अपने घर लौटना चाहता हूँ", "What": "क्या आप बता सकते हैं यह क्या है?", "Where": "क्या आप बता सकते हैं यह कहाँ है?", "Time": "कृपया बताएँगे कि समय क्या हुआ है?", "I Love You": "मैं आपका आदर करता हूँ", "Stop": "कृपया अब रुक जाइए", "No": "जी नहीं", "Please": "कृपया", "Sorry": "कृपया मुझे माफ़ कर दीजिए", "Friend": "आप मेरे मित्र हैं", "Mother": "माता जी", "Book": "मैं यह किताब पढ़ना चाहता हूँ", "Tea": "क्या मुझे एक कप चाय मिल सकती है?", "Name": "मेरा शुभ नाम है", "Happy": "मैं आज बहुत प्रसन्न हूँ"}
-ENGLISH_POLITE_MAP = {"Nothing": "", "Hello": "Greetings to you", "Thank You": "Thank you so much", "Good": "This is very good", "Bad": "I don't think this is right", "Yes": "Yes, please", "Water": "Excuse me, could I please have some water?", "Food": "Could I please get something to eat?", "Toilet": "Could you please tell me where the washroom is?", "Medicine": "I am in need of some medicine, please", "Money": "I require some financial assistance, please", "Help": "Excuse me, would you be able to help me?", "Pain": "I am experiencing severe pain", "Call Doctor": "Could you please call a doctor for me?", "Police": "Please inform the police immediately", "Home": "I would like to return home now", "What": "Could you please explain what this is?", "Where": "Could you please tell me where this is?", "Time": "Excuse me, could you tell me the time?", "I Love You": "I have great respect for you", "Stop": "Could you please stop now?", "No": "No, thank you", "Please": "If you please", "Sorry": "I sincerely apologize", "Friend": "You are a good friend", "Mother": "Mother", "Book": "I would like to read this book", "Tea": "Could I please have a cup of tea?", "Name": "My name is", "Happy": "I am delighted"}
+# --- LOAD TRANSLATIONS ---
+translations = {}
+for lang in ['bengali', 'hindi', 'english']:
+    try:
+        with open(f"translations/{lang}.json", "r", encoding="utf-8") as f:
+            translations[lang] = json.load(f)
+    except Exception as e:
+        print(f"❌ Error loading {lang} translations: {e}")
+        translations[lang] = {"standard": {}, "polite": {}}
 
 # --- BACKGROUND AUDIO GENERATOR ---
 def generate_audio_background(text, lang_code, full_path, url):
@@ -88,14 +84,10 @@ def generate_audio_background(text, lang_code, full_path, url):
     except Exception as e:
         print(f"❌ [BG] TTS Error: {e}")
 
-def get_active_map():
-    global current_lang, is_polite_mode
-    if current_lang == 'hindi':
-        return (HINDI_POLITE_MAP if is_polite_mode else HINDI_MAP), 'hi'
-    elif current_lang == 'english':
-        return (ENGLISH_POLITE_MAP if is_polite_mode else ENGLISH_MAP), 'en'
-    else:
-        return (BENGALI_POLITE_MAP if is_polite_mode else BENGALI_MAP), 'bn'
+def get_active_map(lang='bengali', polite=False):
+    t_type = "polite" if polite else "standard"
+    lang_code_map = {'hindi': 'hi', 'english': 'en', 'bengali': 'bn'}
+    return translations.get(lang, {}).get(t_type, {}), lang_code_map.get(lang, 'bn')
 
 # --- MEDIAPIPE SETUP ---
 mp_hands = mp.solutions.hands
@@ -130,7 +122,13 @@ def draw_robotic_hands(image, hand_landmarks):
         cv2.circle(image, (cx, cy), 2, COLOR_WHITE, -1)
 
 def gen_frames():
-    global current_prediction, last_heartbeat_time, last_sent_prediction, last_audio_time
+    prediction_buffer = collections.deque(maxlen=PREDICTION_BUFFER_SIZE)
+    current_prediction = "Nothing"
+    last_sent_prediction = "Nothing"
+    last_audio_time = 0
+    last_heartbeat_time = time.time()
+    current_lang = 'bengali'
+    is_polite_mode = False
     
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
@@ -174,7 +172,8 @@ def gen_frames():
                         if 0 <= prediction_index < len(CLASSES):
                             raw_prediction = CLASSES[prediction_index]
                 except Exception as e:
-                    print(f"⚠️ Prediction Error: {e}")
+                    print(f"⚠️ Predict fail: {e}")
+                    raw_prediction = "Nothing"
 
             # --- STABILITY LOGIC ---
             prediction_buffer.append(raw_prediction)
@@ -190,7 +189,7 @@ def gen_frames():
                             print(f"👉 [GESTURE] Verified: {current_prediction}")
                             
                             # EMIT UPDATE IMMEDIATELY
-                            active_map, _ = get_active_map()
+                            active_map, _ = get_active_map(current_lang, is_polite_mode)
                             sentence = active_map.get(current_prediction, "")
                             socketio.emit('prediction_update', {
                                 'prediction': current_prediction,
@@ -218,7 +217,7 @@ def gen_frames():
                         socketio.emit('play_audio', {'audio_url': url})
                     else:
                         # Generate in BACKGROUND to not block video
-                        active_map, lang_code = get_active_map()
+                        active_map, lang_code = get_active_map(current_lang, is_polite_mode)
                         text = active_map.get(current_prediction, "")
                         threading.Thread(target=generate_audio_background, args=(text, lang_code, full_path, url)).start()
             else:
@@ -239,14 +238,31 @@ def gen_frames():
 # --- SOCKET EVENTS ---
 @socketio.on('connect')
 def handle_connect():
-    print("🔌 Client Connected")
+    sid = request.sid
+    user_sessions[sid] = {
+        'lang': 'bengali',
+        'polite': False,
+        'buffer': collections.deque(maxlen=PREDICTION_BUFFER_SIZE),
+        'current_prediction': "Nothing",
+        'last_sent_prediction': "Nothing",
+        'last_audio_time': 0
+    }
+    print(f"🔌 Client Connected: {sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    sid = request.sid
+    if sid in user_sessions:
+        del user_sessions[sid]
+    print(f"🔌 Client Disconnected: {sid}")
 
 @socketio.on('update_settings')
 def handle_settings(data):
-    global current_lang, is_polite_mode
-    current_lang = data.get('lang', 'bengali')
-    is_polite_mode = data.get('polite', False)
-    print(f"⚙️ Settings Updated: {current_lang}, Polite: {is_polite_mode}")
+    sid = request.sid
+    if sid in user_sessions:
+        user_sessions[sid]['lang'] = data.get('lang', 'bengali')
+        user_sessions[sid]['polite'] = data.get('polite', False)
+        print(f"⚙️ Settings Updated for {sid}: {user_sessions[sid]['lang']}, Polite: {user_sessions[sid]['polite']}")
 
 # Create a global hands model configured for rapid websocket queries
 socket_hands = mp_hands.Hands(
@@ -260,7 +276,12 @@ mp_lock = threading.Lock()
 
 @socketio.on('video_frame')
 def handle_video_frame(data):
-    global current_prediction, last_sent_prediction, last_audio_time
+    sid = request.sid
+    if sid not in user_sessions:
+        return
+    session = user_sessions[sid]
+    current_lang = session['lang']
+    is_polite_mode = session['polite']
     try:
         if ',' in data:
             data = data.split(',')[1]
@@ -295,31 +316,32 @@ def handle_video_frame(data):
                     if 0 <= prediction_index < len(CLASSES):
                         raw_prediction = CLASSES[prediction_index]
             except Exception as e:
-                pass
+                print(f"⚠️ Predict fail: {e}")
+                raw_prediction = "Nothing"
                 
-        prediction_buffer.append(raw_prediction)
+        session['buffer'].append(raw_prediction)
         
-        if len(prediction_buffer) == PREDICTION_BUFFER_SIZE:
-            if len(set(prediction_buffer)) == 1: 
-                new_pred = prediction_buffer[0]
+        if len(session['buffer']) == PREDICTION_BUFFER_SIZE:
+            if len(set(session['buffer'])) == 1: 
+                new_pred = session['buffer'][0]
                 with state_lock:
-                    if current_prediction != new_pred:
-                        current_prediction = new_pred
-                        active_map, _ = get_active_map()
-                        sentence = active_map.get(current_prediction, "")
+                    if session['current_prediction'] != new_pred:
+                        session['current_prediction'] = new_pred
+                        active_map, _ = get_active_map(current_lang, is_polite_mode)
+                        sentence = active_map.get(session['current_prediction'], "")
                         emit('prediction_update', {
-                            'prediction': current_prediction,
+                            'prediction': session['current_prediction'],
                             'sentence': sentence
                         })
                         
         current_time = time.time()
-        if current_prediction != "Nothing":
-            if current_prediction != last_sent_prediction or (current_time - last_audio_time) > AUDIO_COOLDOWN:
-                last_sent_prediction = current_prediction
-                last_audio_time = current_time
+        if session['current_prediction'] != "Nothing":
+            if session['current_prediction'] != session['last_sent_prediction'] or (current_time - session['last_audio_time']) > AUDIO_COOLDOWN:
+                session['last_sent_prediction'] = session['current_prediction']
+                session['last_audio_time'] = current_time
                 
                 folder_name = f"{current_lang}_polite" if is_polite_mode else current_lang
-                filename = current_prediction.lower().replace(" ", "_")
+                filename = session['current_prediction'].lower().replace(" ", "_")
                 if is_polite_mode:
                     filename += "_polite"
                 
@@ -330,11 +352,11 @@ def handle_video_frame(data):
                 if os.path.exists(full_path):
                     emit('play_audio', {'audio_url': url})
                 else:
-                    active_map, lang_code = get_active_map()
-                    text = active_map.get(current_prediction, "")
+                    active_map, lang_code = get_active_map(current_lang, is_polite_mode)
+                    text = active_map.get(session['current_prediction'], "")
                     threading.Thread(target=generate_audio_background, args=(text, lang_code, full_path, url)).start()
         else:
-            last_sent_prediction = "Nothing"
+            session['last_sent_prediction'] = "Nothing"
             
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50]) 
         frame_bytes = base64.b64encode(buffer).decode('utf-8')
@@ -359,4 +381,4 @@ def log_event():
 
 if __name__ == '__main__':
     # Use socketio.run instead of app.run
-    socketio.run(app, debug=True, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=False)

@@ -3,17 +3,14 @@ import mediapipe as mp
 import numpy as np
 import pandas as pd
 import os
+import sys
+import argparse
 
 # --- Configuration ---
 DATA_FILE = "data.csv"
 FRAMES_PER_CLASS = 500
 # --- TARGETED RETRAINING LIST ---
-# If you want to retake specific gestures, uncomment the list below.
-# OTHERWISE, IT WILL CYCLE THROUGH ALL 30 CLASSES.
-# TARGET_CLASSES = ["Bad", "Time", "Pain", "Friend"] 
-# TARGET_CLASSES = ["Bad", "Time", "Pain", "Friend"] 
-# TARGET_CLASSES = ["Thank You", "Good", "Money"] # Set to empty list [] to record ALL classes
-TARGET_CLASSES = ["Name"]
+
 CLASSES_FULL = [
     "Nothing", "Hello", "Thank You", "Good", "Bad", "Yes", 
     "Water", "Food", "Toilet", "Medicine", "Money", 
@@ -23,7 +20,11 @@ CLASSES_FULL = [
     "Book", "Tea", "Name", "Happy"
 ]
 
-# Use Target List if not empty
+parser = argparse.ArgumentParser()
+parser.add_argument('--classes', nargs='*', default=[], help='Target classes to record')
+args, _ = parser.parse_known_args()
+
+TARGET_CLASSES = args.classes
 CLASSES = TARGET_CLASSES if TARGET_CLASSES else CLASSES_FULL
 
 # --- MediaPipe Setup ---

@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import pickle
+import datetime
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, confusion_matrix
@@ -61,9 +62,16 @@ def train_model():
     accuracy = accuracy_score(y_test, y_pred)
     print(f"Model Accuracy: {accuracy * 100:.2f}%")
     
-    # Save model
+    # Save model metadata alongside module
     with open(MODEL_FILE, 'wb') as f:
-        pickle.dump({'model': model}, f)
+        classes_full = df['label'].unique().tolist()
+        pickle.dump({
+            'model': model, 
+            'accuracy': accuracy,
+            'classes': classes_full, 
+            'version': '1.2',
+            'trained_at': datetime.datetime.now().isoformat()
+        }, f)
     
     print(f"Model saved to {MODEL_FILE}")
 

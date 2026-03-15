@@ -20,3 +20,10 @@ Desktop.ini
 # IDEs
 .vscode/
 .idea/
+
+# Environment Variables
+.env
+
+# Binary executions
+*.exe
+ngrok.exe
