@@ -1,0 +1,67 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Session #{{ db_session.id }} — Ishara-Connect{% endblock %}
+{% block content %}
+
+<a class="back-link" href="{{ url_for('dashboard.home') }}"><i class="fa-solid fa-arrow-left"></i> Back to dashboard</a>
+
+<section class="session-header-card">
+    <div>
+        <h1>Session #{{ db_session.id }}
+            {% if not db_session.ended_at %}<span class="live-tag"><span class="pulse-dot-sm"></span> LIVE</span>{%
+            endif %}
+        </h1>
+        <p class="session-header-meta">
+            Started {{ db_session.started_at.strftime('%B %d, %Y at %H:%M:%S') }}
+            {% if db_session.ended_at %} · Ended {{ db_session.ended_at.strftime('%H:%M:%S') }}
+            · {{ ((db_session.ended_at - db_session.started_at).total_seconds() // 60)|int }} min duration{% endif %}
+            · {{ db_session.device_type or 'unknown device' }}
+        </p>
+    </div>
+    <div class="session-header-count">{{ events|length }}<span>words signed</span></div>
+</section>
+
+{% if alerts %}
+<section class="session-alerts">
+    <h2 class="col-title"><i class="fa-solid fa-triangle-exclamation"></i> Alerts in this session</h2>
+    {% for a in alerts %}
+    <div class="alert-card sev-{{ a.severity }} {{ 'ack-done' if a.acknowledged_at else '' }}"
+        data-alert-id="{{ a.id }}">
+        <div class="alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="alert-body">
+            <span class="alert-title">{{ a.severity|upper }} — "{{ a.trigger_phrase }}" at {{ a.ts.strftime('%H:%M:%S')
+                }}</span>
+            <span class="alert-meta ack-status">
+                {% if a.acknowledged_at %}Acknowledged at {{ a.acknowledged_at.strftime('%H:%M:%S') }}{% else %}Not yet
+                acknowledged{% endif %}
+            </span>
+        </div>
+        {% if not a.acknowledged_at %}
+        <button class="ack-btn" data-alert-id="{{ a.id }}"><i class="fa-solid fa-check"></i> Acknowledge</button>
+        {% endif %}
+    </div>
+    {% endfor %}
+</section>
+{% endif %}
+
+<section class="transcript-timeline">
+    {% for e in events %}
+    <div class="timeline-row{{ ' timeline-row-trigger' if e.decoded_phrase in emergency_triggers else '' }}"
+        data-conf="{{ 'high' if e.confidence and e.confidence >= 0.75 else ('mid' if e.confidence and e.confidence >= 0.5 else 'low') }}">
+        <span class="timeline-ts">{{ e.ts.strftime('%H:%M:%S') }}</span>
+        <span class="timeline-dot"></span>
+        <span class="timeline-phrase">{{ e.decoded_phrase }}{% if e.decoded_phrase in emergency_triggers %} <i
+                class="fa-solid fa-triangle-exclamation feed-trigger-icon"></i>{% endif %}</span>
+        <span class="timeline-conf" title="Model confidence">{{ '%.0f'|format(e.confidence * 100) if e.confidence is not
+            none else '—' }}%</span>
+    </div>
+    {% else %}
+    <div class="feed-empty">Nothing signed in this session yet.</div>
+    {% endfor %}
+</section>
+
+{% if not db_session.ended_at %}
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+{% endif %}
+<script>window.ISHARA_SESSION_ID = Number('{{ db_session.id }}');</script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

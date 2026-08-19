@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token }}">
+    <title>{% block title %}Ishara-Connect — Caregiver Dashboard{% endblock %}</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+    {% block head %}{% endblock %}
+</head>
+
+<body>
+    {% if user %}
+    <header class="dash-header">
+        <a class="dash-brand" href="{{ url_for('dashboard.home') }}">
+            <i class="fa-solid fa-hand-holding-heart"></i> Ishara<span>Connect</span>
+        </a>
+        <div class="dash-header-right">
+            <div class="dash-institution">
+                <i class="fa-solid fa-hospital"></i> {{ institution.name if institution else '' }}
+            </div>
+            <div class="dash-user">
+                <div class="dash-user-avatar">{{ (user.name or user.email or '?')[0]|upper }}</div>
+                <div class="dash-user-meta">
+                    <span class="dash-user-name">{{ user.name or user.email }}</span>
+                    <span class="dash-user-role">{{ user.role }}</span>
+                </div>
+            </div>
+            <a class="dash-logout" href="{{ url_for('dashboard.logout') }}" title="Log out"><i
+                    class="fa-solid fa-arrow-right-from-bracket"></i></a>
+        </div>
+    </header>
+    {% endif %}
+    <main class="dash-main">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+
+</html>

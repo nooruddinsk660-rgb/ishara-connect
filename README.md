@@ -51,6 +51,54 @@ We built Ishara Connect with stability and performance in mind.
 
 ---
 
+## 📂 File Structure & Descriptions
+
+Below is the directory structure of the **Ishara Connect** codebase, along with a detailed explanation of what each file is doing:
+
+```
+ishara-connect/
+├── data/                    # Landmark sequences data directory
+├── static/                  # Frontend static assets
+│   ├── css/
+│   │   └── style.css        # Main application styling (Cyberpunk & Light modes)
+│   ├── js/
+│   │   └── socket.io.min.js # Socket.IO client library for real-time communication
+│   └── audio/               # Cached/pre-generated Text-to-Speech MP3 audio assets
+├── templates/               # Flask Jinja2 HTML templates
+│   ├── index.html           # Main entry page template
+│   └── components/          # Modular UI components
+│       ├── camera.html      # Camera preview card with overlays and controls
+│       ├── gestures.html    # Sidebar showing the 30 gesture classes
+│       ├── header.html      # Top navigation, language selection, and themes
+│       └── scripts.html     # Client-side JavaScript (websockets, webcam, drawing)
+├── translations/            # Localization dictionary files
+│   ├── bengali.json         # Bengali translation maps (standard & polite)
+│   ├── english.json         # English translation maps (standard & polite)
+│   └── hindi.json           # Hindi translation maps (standard & polite)
+├── .env                     # Local environment configuration secrets
+├── .gitignore               # Files and patterns ignored by Git
+├── app.py                   # Main Flask & Socket.IO server (handles streaming & inference)
+├── data.csv                 # Dataset containing recorded hand landmark keypoints
+├── data_collector.py        # Webcam tool to record keypoint dataset for target gestures
+├── generate_premium_audio.py# Pre-generator script for edge-tts audio caching
+├── Ishara_Connect_Project_Report.md # Full documentation and architecture overview
+├── Procfile                 # Deployment configurations for production web server
+├── train_model.py           # ML training script to generate the gesture classification model
+└── utils.py                 # Keypoint extraction and normalization helper functions
+```
+
+### 📋 What Each File is Doing:
+
+*   **`app.py`**: The central application controller. It initializes the Flask app, configures Socket.IO, loads the trained Machine Learning model (`model.p`), and coordinates multi-threaded real-time hand-landmark predictions via WebSockets. It also serves standard HTTP routes and acts as a fallback TTS generator.
+*   **`data_collector.py`**: The data collection tool (the dataset creation task file). It captures raw frames from the webcam, detects hand landmarks using MediaPipe, extracts their normalized coordinates, and records them under specific gesture labels into `data.csv`. This script supports recording all 30 classes or target subsets via command-line arguments.
+*   **`train_model.py`**: The model trainer. It loads the keypoints from `data.csv`, applies dataset augmentation (injecting Gaussian noise to make predictions robust to hand sizes and distances), trains a `RandomForestClassifier`, and pickles the final model to `model.p` alongside accuracy metrics.
+*   **`utils.py`**: The keypoint preprocessing utility. It defines `extract_keypoints()`, which extracts hand landmarks, translates them relative to the wrist coordinates (centering), and scales them relative to the middle MCP distance (normalization) so the classification is invariant to camera distance.
+*   **`generate_premium_audio.py`**: An offline asset pre-generator. It connects to the `edge-tts` API to pre-generate high-quality natural voice files for all translation strings in Bengali, Hindi, and English (for both standard and polite modes), saving them locally to avoid dynamic latency during live video translation.
+*   **`templates/components/scripts.html`**: The frontend logic driver. Connects to the Flask-SocketIO server, requests/captures webcam frames, pushes them to the backend, parses processed frame canvas data, listens for predicted gesture updates, triggers audio playback, and dynamically updates translations in real-time.
+*   **`translations/` JSON files**: Define standard and polite translations for all 30 gesture categories in three distinct languages, mapping the classifier outputs to spoken sentences.
+
+---
+
 ## 📸 Screenshots
 
 *(Add your screenshots here to show off the beautiful UI!)*

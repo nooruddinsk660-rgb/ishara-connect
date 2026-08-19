@@ -1,7 +1,11 @@
-<!-- Load Socket.IO from CDN -->
-<script src="https://cdn.socket.io/4.6.0/socket.io.min.js"
-    integrity="sha384-c79GN5VsunZvi+Q/WObgk2in0CbZsHnjEqvFxC5DxHn9lTfNce2WW6h2pH6u/kF+"
-    crossorigin="anonymous"></script>
+<!-- Load Socket.IO from static asset (with CDN fallback) -->
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script>
+    if (typeof io === 'undefined') {
+        document.write('<script src="https://cdn.socket.io/4.6.0/socket.io.min.js"><\/script>');
+    }
+</script>
+
 
 <script>
     // --- Global States ---
@@ -72,6 +76,29 @@
                 console.warn("⚠️ Autoplay blocked:", e);
                 this.isAudioPlaying = false;
             });
+        },
+
+        showEmergencyConfirmation: function (triggerPhrase, severity) {
+            // Built dynamically rather than living in every template's HTML --
+            // this only needs to exist the moment it's used.
+            let overlay = document.getElementById('emergency-confirm-overlay');
+            if (overlay) overlay.remove(); // replace if one's already fading out
+
+            overlay = document.createElement('div');
+            overlay.id = 'emergency-confirm-overlay';
+            overlay.className = 'emergency-confirm-overlay sev-' + severity;
+            overlay.innerHTML =
+                '<i class="fa-solid fa-triangle-exclamation"></i>' +
+                '<span class="emergency-confirm-title">Alert sent to your care team</span>' +
+                '<span class="emergency-confirm-sub">"' + triggerPhrase + '" — someone has been notified</span>';
+            document.body.appendChild(overlay);
+
+            requestAnimationFrame(() => overlay.classList.add('is-visible'));
+
+            setTimeout(() => {
+                overlay.classList.remove('is-visible');
+                setTimeout(() => overlay.remove(), 500);
+            }, 4000);
         }
     };
 
@@ -260,10 +287,37 @@
         socket.on('prediction_update', (data) => {
             const predElement = document.getElementById('pred-text');
             const sentElement = document.getElementById('sent-text');
+            const ringFill = document.getElementById('ring-fill');
+            const ringPct = document.getElementById('ring-pct');
 
             if (data.prediction && data.prediction !== "Nothing") {
-                if (predElement) predElement.innerText = data.prediction;
+                if (predElement) {
+                    predElement.innerText = data.prediction;
+                    // Retrigger the settle animation on every new word, even
+                    // back-to-back ones, rather than an abrupt text swap.
+                    predElement.classList.remove('pred-updated');
+                    void predElement.offsetWidth; // force reflow so the animation restarts
+                    predElement.classList.add('pred-updated');
+                }
                 if (sentElement) sentElement.innerText = data.sentence;
+
+                // Confidence ring -- real model.predict_proba() output, not a
+                // decorative animation. Same high/mid/low color language as
+                // the caregiver dashboard's feed.
+                if (ringFill && ringPct) {
+                    const circumference = 119.4;
+                    const conf = data.confidence;
+                    if (conf === null || conf === undefined) {
+                        ringFill.style.strokeDashoffset = String(circumference);
+                        ringPct.textContent = '';
+                        ringFill.classList.remove('conf-mid', 'conf-low');
+                    } else {
+                        ringFill.style.strokeDashoffset = String(circumference * (1 - conf));
+                        ringPct.textContent = Math.round(conf * 100) + '%';
+                        ringFill.classList.toggle('conf-mid', conf < 0.75 && conf >= 0.5);
+                        ringFill.classList.toggle('conf-low', conf < 0.5);
+                    }
+                }
 
                 document.querySelectorAll('.gesture-icon').forEach(el => el.classList.remove('active'));
                 const activeIcon = document.getElementById('icon-' + data.prediction);
@@ -276,6 +330,13 @@
 
         socket.on('play_audio', (data) => {
             if (data.audio_url) AppManager.playAudio(data.audio_url);
+        });
+
+        // Stage 3: Emergency Detector confirmation. "Fail loud, not silent" --
+        // the signer should see that this was flagged and sent, not just
+        // trust that a notification happened somewhere they can't see.
+        socket.on('emergency_confirmed', (data) => {
+            AppManager.showEmergencyConfirmation(data.trigger_phrase, data.severity);
         });
 
         // Backend returning drawn frames
@@ -371,7 +432,8 @@
     // --- UI Logic ---
     // Start Overlay Unlock
     document.getElementById('start-overlay')?.addEventListener('click', function () {
-        this.style.display = 'none';
+        this.classList.add('is-hiding');
+        setTimeout(() => { this.style.display = 'none'; }, 500);
         new Audio().play().catch(e => { }); // Unlock Audio Context
     });
 
@@ -523,6 +585,21 @@
             setTimeout(() => icon.classList.remove('active'), 1000);
         }
         const predText = document.getElementById('pred-text');
-        if (predText) predText.innerText = gestureName;
+        if (predText) {
+            predText.innerText = gestureName;
+            predText.classList.remove('pred-updated');
+            void predText.offsetWidth;
+            predText.classList.add('pred-updated');
+        }
+        // Manual selection is a deliberate, certain action -- show the ring
+        // full and green rather than leaving it at whatever the camera last
+        // measured, which would misleadingly read as a low-confidence guess.
+        const ringFill = document.getElementById('ring-fill');
+        const ringPct = document.getElementById('ring-pct');
+        if (ringFill && ringPct) {
+            ringFill.style.strokeDashoffset = '0';
+            ringFill.classList.remove('conf-mid', 'conf-low');
+            ringPct.textContent = '✓';
+        }
     }
 </script>

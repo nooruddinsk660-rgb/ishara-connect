@@ -1,0 +1,33 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Sign in — Ishara-Connect Dashboard{% endblock %}
+{% block content %}
+<div class="login-shell">
+    <div class="login-card">
+        <div class="login-brand">
+            <i class="fa-solid fa-hand-holding-heart"></i> Ishara<span>Connect</span>
+        </div>
+        <p class="login-sub">Caregiver &amp; care-team access</p>
+
+        {% if error %}
+        <div class="login-error"><i class="fa-solid fa-triangle-exclamation"></i> {{ error }}</div>
+        {% endif %}
+
+        <form method="POST" class="login-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label>
+                <span>Email</span>
+                <input type="email" name="email" required autofocus autocomplete="email"
+                    placeholder="you@institution.org">
+            </label>
+            <label>
+                <span>Password</span>
+                <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+            </label>
+            <button type="submit"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
+        </form>
+
+        <p class="login-footnote">Accounts are set up by your institution's Ishara-Connect administrator — there's no
+            self-signup yet.</p>
+    </div>
+</div>
+{% endblock %}

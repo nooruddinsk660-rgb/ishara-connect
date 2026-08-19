@@ -204,16 +204,17 @@ header {
 /* --- Main Layout --- */
 .main-container {
     display: flex;
+    flex-direction: column;
     flex: 1;
     padding: 20px 40px;
-    gap: 40px;
+    gap: 18px;
     overflow: hidden;
     position: relative;
 }
 
 /* Glassmorphism Cards */
-.video-card,
-.info-card {
+.stage-card,
+.reply-card {
     background: var(--card-bg);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -223,9 +224,14 @@ header {
     transition: all 0.4s ease;
 }
 
-.video-card {
-    flex: 6;
-    padding: 10px;
+/* --- Stage card: the hero. The video feed is the most characteristic thing
+   in this product's world, so it fills the frame instead of sharing equal
+   billing with a text panel beside it. Recognition results are an overlay
+   on top of it, like a caption, not a competing box. --- */
+.stage-card {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -233,13 +239,10 @@ header {
     overflow: hidden;
 }
 
-.video-card::before {
+.stage-card::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    inset: 0;
     border-radius: 32px;
     padding: 2px;
     background: linear-gradient(45deg, var(--accent-primary), transparent, var(--accent-secondary));
@@ -249,71 +252,237 @@ header {
     mask-composite: exclude;
     pointer-events: none;
     opacity: 0.5;
+    z-index: 2;
 }
 
 #video_feed {
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 24px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
 }
 
-.info-card {
-    flex: 4;
+/* Viewfinder corner brackets -- the signature detail. Frames the feed like a
+   precision scanner rather than a plain video rectangle, and reads as
+   purpose-built for recognition rather than a generic webcam widget. */
+.viewfinder {
+    position: absolute;
+    inset: 24px;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.vf-corner {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    border: 2.5px solid var(--accent-primary);
+    opacity: 0.75;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+    animation: vf-breathe 3.2s ease-in-out infinite;
+}
+
+.vf-tl {
+    top: 0;
+    left: 0;
+    border-right: none;
+    border-bottom: none;
+    border-radius: 10px 0 0 0;
+}
+
+.vf-tr {
+    top: 0;
+    right: 0;
+    border-left: none;
+    border-bottom: none;
+    border-radius: 0 10px 0 0;
+    animation-delay: 0.15s;
+}
+
+.vf-bl {
+    bottom: 0;
+    left: 0;
+    border-right: none;
+    border-top: none;
+    border-radius: 0 0 0 10px;
+    animation-delay: 0.3s;
+}
+
+.vf-br {
+    bottom: 0;
+    right: 0;
+    border-left: none;
+    border-top: none;
+    border-radius: 0 0 10px 0;
+    animation-delay: 0.45s;
+}
+
+@keyframes vf-breathe {
+
+    0%,
+    100% {
+        opacity: 0.55;
+    }
+
+    50% {
+        opacity: 0.95;
+    }
+}
+
+/* Caption bar -- recognition result, overlaid at the base of the stage like
+   a subtitle, so reading it never means looking away from the sign itself. */
+.caption-bar {
+    position: absolute;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    z-index: 4;
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    padding: 16px 24px;
+    border-radius: 24px;
+    background: rgba(5, 8, 10, 0.55);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+[data-theme="light"] .caption-bar {
+    background: rgba(255, 255, 255, 0.72);
+    border-color: rgba(31, 38, 135, 0.1);
+}
+
+.confidence-ring {
+    position: relative;
+    width: 52px;
+    height: 52px;
+    flex-shrink: 0;
+}
+
+.confidence-ring svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.ring-track {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.12);
+    stroke-width: 3.5;
+}
+
+.ring-fill {
+    fill: none;
+    stroke: var(--accent-primary);
+    stroke-width: 3.5;
+    stroke-linecap: round;
+    stroke-dasharray: 119.4;
+    stroke-dashoffset: 119.4;
+    transition: stroke-dashoffset 0.5s cubic-bezier(0.4, 0, 0.2, 1), stroke 0.4s ease;
+}
+
+.ring-fill.conf-mid {
+    stroke: #ffb020;
+}
+
+.ring-fill.conf-low {
+    stroke: #ff4757;
+}
+
+.ring-pct {
+    position: absolute;
+    inset: 0;
+    display: flex;
     align-items: center;
     justify-content: center;
-    text-align: center;
-    padding: 40px;
-    position: relative;
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: var(--text-main);
+    font-variant-numeric: tabular-nums;
 }
 
-/* Info Card Glow */
-.info-card::after {
-    content: '';
-    position: absolute;
-    width: 200px;
-    height: 200px;
-    background: var(--accent-secondary);
-    filter: blur(90px);
-    opacity: 0.15;
-    z-index: 0;
-    border-radius: 50%;
+.caption-text {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
 }
 
-.label-small {
-    font-size: 0.9rem;
-    text-transform: uppercase;
-    letter-spacing: 3px;
-    color: var(--text-muted);
-    margin-bottom: 20px;
-    z-index: 1;
-    font-weight: 600;
+.caption-text .label-small {
+    margin-bottom: 4px;
+    font-size: 0.68rem;
+    letter-spacing: 2.5px;
 }
 
 #pred-text {
-    font-size: 5rem;
+    font-size: 2.1rem;
     font-weight: 800;
     color: var(--text-main);
-    z-index: 1;
-    line-height: 1;
-    margin-bottom: 10px;
+    line-height: 1.05;
     background: linear-gradient(to bottom right, var(--text-main), var(--text-muted));
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    text-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#pred-text.pred-updated {
+    animation: pred-settle 0.45s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes pred-settle {
+    0% {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 #sent-text {
-    font-size: 1.8rem;
+    font-size: 0.95rem;
     color: var(--accent-tertiary);
-    margin-top: 15px;
+    margin-top: 3px;
     font-weight: 500;
-    z-index: 1;
     opacity: 0.9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* --- Reply card: secondary by design. This is a different feature (hearing
+   the other person back), not a rival to the recognition hero above it. --- */
+.reply-card {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 18px 26px;
+    position: relative;
+}
+
+.reply-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.reply-label i {
+    color: var(--accent-secondary);
+}
+
+.reply-card .incoming-text {
+    flex: 1;
+    margin: 0;
 }
 
 /* --- Gesture Grid (Dock Style) --- */
@@ -344,6 +513,27 @@ header {
     cursor: pointer;
     backdrop-filter: blur(5px);
     position: relative;
+}
+
+/* Emergency vocabulary (Help, Pain, Call Doctor, Police) -- the same four
+   words that trigger the dashboard's alert system get a quiet visual tell
+   here too, so the connection between "this sign" and "that alert" is
+   visible before anyone ever needs it, not just discovered in an emergency. */
+.gesture-icon.gesture-emergency {
+    border-color: rgba(255, 71, 87, 0.28);
+}
+
+.gesture-icon.gesture-emergency i {
+    color: rgba(255, 113, 124, 0.85);
+}
+
+.gesture-icon.gesture-emergency:hover {
+    border-color: #ff4757;
+    box-shadow: 0 15px 30px rgba(255, 71, 87, 0.2);
+}
+
+.gesture-icon.gesture-emergency:hover i {
+    color: #ff4757;
 }
 
 .gesture-icon i {
@@ -377,6 +567,12 @@ header {
     border-color: var(--accent-primary);
     transform: translateY(-15px) scale(1.1);
     box-shadow: 0 0 25px var(--accent-glow);
+}
+
+.gesture-icon.gesture-emergency.active {
+    background: rgba(255, 71, 87, 0.25);
+    border-color: #ff4757;
+    box-shadow: 0 0 25px rgba(255, 71, 87, 0.45);
 }
 
 .gesture-icon.active i {
@@ -840,7 +1036,7 @@ input:checked+.slider:before {
     }
 
     #pred-text {
-        font-size: 3.5rem;
+        font-size: 1.9rem;
     }
 }
 
@@ -858,18 +1054,13 @@ input:checked+.slider:before {
         padding: 15px;
     }
 
-    .video-card {
-        flex: none;
-        width: 100%;
-        min-height: 400px;
-        box-sizing: border-box;
+    .stage-card {
+        min-height: 340px;
     }
 
-    .info-card {
-        flex: none;
-        width: 100%;
-        padding: 30px 20px;
-        box-sizing: border-box;
+    .reply-card {
+        flex-wrap: wrap;
+        padding: 16px 20px;
     }
 
     .grid-wrapper {
@@ -920,16 +1111,29 @@ input:checked+.slider:before {
         font-size: 1.5rem;
     }
 
-    #pred-text {
-        font-size: 3rem;
+    .stage-card {
+        min-height: 300px;
     }
 
-    .video-card {
-        min-height: 350px;
+    .caption-bar {
+        gap: 12px;
+        padding: 12px 16px;
+        left: 12px;
+        right: 12px;
+        bottom: 12px;
+    }
+
+    .confidence-ring {
+        width: 42px;
+        height: 42px;
+    }
+
+    #pred-text {
+        font-size: 1.6rem;
     }
 
     #sent-text {
-        font-size: 1.4rem;
+        font-size: 0.85rem;
     }
 
     .theme-toggle-btn {
@@ -960,18 +1164,31 @@ input:checked+.slider:before {
         font-size: 0.8rem;
     }
 
-    .video-card {
-        min-height: 250px;
+    .stage-card {
+        min-height: 260px;
         border-radius: 20px;
     }
 
-    .info-card {
+    .viewfinder {
+        inset: 14px;
+    }
+
+    .vf-corner {
+        width: 24px;
+        height: 24px;
+    }
+
+    .reply-card {
         border-radius: 20px;
-        padding: 20px 15px;
+        padding: 14px 16px;
+    }
+
+    .caption-bar {
+        border-radius: 18px;
     }
 
     #pred-text {
-        font-size: 2.2rem;
+        font-size: 1.35rem;
     }
 
     .gesture-icon {
@@ -1013,26 +1230,26 @@ input:checked+.slider:before {
    Premium Interactivity & Polish
    ========================================================================== */
 
-.video-card,
-.info-card {
+.stage-card,
+.reply-card {
     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
 }
 
-.video-card:hover {
+.stage-card:hover {
     transform: translateY(-5px);
     box-shadow: 0 15px 45px rgba(0, 0, 0, 0.6), inset 0 0 0 2px var(--accent-glow);
 }
 
-[data-theme="light"] .video-card:hover {
+[data-theme="light"] .stage-card:hover {
     box-shadow: 0 15px 45px rgba(31, 38, 135, 0.2), inset 0 0 0 2px var(--accent-glow);
 }
 
-.info-card:hover {
+.reply-card:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-soft), 0 10px 30px rgba(0, 242, 96, 0.1);
 }
 
-[data-theme="light"] .info-card:hover {
+[data-theme="light"] .reply-card:hover {
     box-shadow: var(--shadow-soft), 0 10px 30px rgba(108, 92, 231, 0.15);
 }
 
@@ -1063,4 +1280,204 @@ input:checked+.slider:before {
     background: #ff4757;
     color: #fff;
     box-shadow: 0 5px 15px rgba(255, 71, 87, 0.2);
+}
+
+/* ==========================================================================
+   Stage 3 — Emergency Detector: patient-facing confirmation banner.
+   "Fail loud, not silent" -- shown the moment a trigger word (Pain, Help,
+   Call Doctor, Police) is confirmed, so the signer sees it was flagged
+   rather than trusting a notification happened somewhere invisible to them.
+   ========================================================================== */
+.emergency-confirm-overlay {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-30px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 18px 26px;
+    border-radius: 20px;
+    background: rgba(20, 5, 8, 0.92);
+    backdrop-filter: blur(16px);
+    border: 1px solid #ff4757;
+    box-shadow: 0 10px 40px rgba(255, 71, 87, 0.35);
+    opacity: 0;
+    transition: opacity 0.4s ease, transform 0.4s ease;
+    max-width: 90vw;
+    pointer-events: none;
+}
+
+.emergency-confirm-overlay.is-visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.emergency-confirm-overlay i {
+    font-size: 1.6rem;
+    color: #ff4757;
+    flex-shrink: 0;
+    animation: emergency-pulse 1s ease-in-out infinite;
+}
+
+@keyframes emergency-pulse {
+
+    0%,
+    100% {
+        transform: scale(1);
+    }
+
+    50% {
+        transform: scale(1.15);
+    }
+}
+
+.emergency-confirm-title {
+    display: block;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 1rem;
+    color: #fff;
+}
+
+.emergency-confirm-sub {
+    display: block;
+    font-family: var(--font-heading);
+    font-size: 0.82rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin-top: 2px;
+}
+
+@media (max-width: 600px) {
+    .emergency-confirm-overlay {
+        top: 12px;
+        padding: 14px 18px;
+        border-radius: 16px;
+    }
+
+    .emergency-confirm-title {
+        font-size: 0.9rem;
+    }
+
+    .emergency-confirm-sub {
+        font-size: 0.75rem;
+    }
+}
+
+/* ==========================================================================
+   Start overlay -- first thing anyone sees, so it earns real treatment
+   instead of inline styles. The pulse behind the icon signals "live system,
+   about to start listening" before anything actually starts.
+   ========================================================================== */
+.start-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-gradient);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    z-index: 9999;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    color: var(--text-main);
+    cursor: pointer;
+    text-align: center;
+    padding: 20px;
+    box-sizing: border-box;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.start-overlay.is-hiding {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.start-icon-wrap {
+    position: relative;
+    width: 108px;
+    height: 108px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 28px;
+}
+
+.start-icon-wrap::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+    animation: start-pulse 2.4s ease-in-out infinite;
+}
+
+.start-icon-wrap::after {
+    content: '';
+    position: absolute;
+    inset: 10px;
+    border-radius: 50%;
+    border: 1.5px solid var(--accent-primary);
+    opacity: 0.5;
+}
+
+@keyframes start-pulse {
+
+    0%,
+    100% {
+        transform: scale(0.85);
+        opacity: 0.6;
+    }
+
+    50% {
+        transform: scale(1.15);
+        opacity: 1;
+    }
+}
+
+.start-icon {
+    position: relative;
+    z-index: 1;
+    font-size: 2.1rem;
+    color: var(--accent-primary);
+    filter: drop-shadow(0 0 15px var(--accent-glow));
+}
+
+.start-eyebrow {
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+}
+
+.start-title {
+    font-size: 2.6rem;
+    font-weight: 800;
+    margin: 0 0 10px;
+    background: linear-gradient(to bottom right, var(--text-main), var(--text-muted));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.start-sub {
+    color: var(--text-muted);
+    font-size: 1rem;
+    margin: 0;
+    max-width: 320px;
+}
+
+@media (max-width: 480px) {
+    .start-title {
+        font-size: 2rem;
+    }
+
+    .start-icon-wrap {
+        width: 88px;
+        height: 88px;
+    }
 }

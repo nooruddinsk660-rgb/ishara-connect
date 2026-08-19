@@ -1,0 +1,91 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Dashboard — Ishara-Connect{% endblock %}
+{% block content %}
+
+<section id="alerts-banner" class="alerts-banner {{ 'has-alerts' if active_alerts else '' }}">
+    {% for a in active_alerts %}
+    <div class="alert-card sev-{{ a.severity }}" data-alert-id="{{ a.id }}">
+        <div class="alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="alert-body">
+            <span class="alert-title">{{ a.severity|upper }} — "{{ a.trigger_phrase }}" signed</span>
+            <span class="alert-meta">{{ a.ts.strftime('%H:%M:%S') }} · <a
+                    href="{{ url_for('dashboard.session_detail', session_id=a.session_id) }}">Session #{{ a.session_id
+                    }}</a></span>
+        </div>
+        <button class="ack-btn" data-alert-id="{{ a.id }}"><i class="fa-solid fa-check"></i> Acknowledge</button>
+    </div>
+    {% endfor %}
+</section>
+
+<section class="monitor-panel">
+    <div class="monitor-head">
+        <div class="monitor-title">
+            <span class="pulse-dot-lg"></span>
+            <h1>Live Feed</h1>
+        </div>
+        <div class="monitor-sub" id="monitor-status">connecting…</div>
+    </div>
+    <div class="monitor-feed" id="live-feed">
+        {% for e in recent_events %}
+        <div class="feed-line{{ ' feed-line-trigger' if e.decoded_phrase in emergency_triggers else '' }}"
+            data-conf="{{ 'high' if e.confidence and e.confidence >= 0.75 else ('mid' if e.confidence and e.confidence >= 0.5 else 'low') }}">
+            <span class="feed-ts">{{ e.ts.strftime('%H:%M:%S') }}</span>
+            <span class="feed-dot"></span>
+            <span class="feed-phrase">{{ e.decoded_phrase }}{% if e.decoded_phrase in emergency_triggers %} <i
+                    class="fa-solid fa-triangle-exclamation feed-trigger-icon"></i>{% endif %}</span>
+            <span class="feed-conf">{{ '%.0f'|format(e.confidence * 100) if e.confidence is not none else '—' }}%</span>
+        </div>
+        {% else %}
+        <div class="feed-empty">No signed words yet. New predictions will appear here the moment they happen.</div>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="dash-grid">
+    <div class="dash-col">
+        <h2 class="col-title"><i class="fa-solid fa-tower-broadcast"></i> Active now <span class="count-badge">{{
+                active_sessions|length }}</span></h2>
+        {% if active_sessions %}
+        <div class="session-cards">
+            {% for s in active_sessions %}
+            <a class="session-card active" href="{{ url_for('dashboard.session_detail', session_id=s.id) }}">
+                <span class="pulse-dot-sm"></span>
+                <div class="session-card-body">
+                    <span class="session-card-title">Session #{{ s.id }}</span>
+                    <span class="session-card-meta">Started {{ s.started_at.strftime('%H:%M:%S') }} · {{ s.device_type
+                        or 'unknown device' }}</span>
+                </div>
+                <span class="session-card-count">{{ event_counts.get(s.id, 0) }} words</span>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-block">No one is signing right now.</div>
+        {% endif %}
+    </div>
+
+    <div class="dash-col">
+        <h2 class="col-title"><i class="fa-solid fa-clock-rotate-left"></i> Recent sessions</h2>
+        {% if recent_sessions %}
+        <div class="session-list">
+            {% for s in recent_sessions %}
+            <a class="session-row" href="{{ url_for('dashboard.session_detail', session_id=s.id) }}">
+                <span class="session-row-date">{{ s.started_at.strftime('%b %d, %H:%M') }}</span>
+                <span class="session-row-dur">
+                    {% if s.ended_at %}{{ ((s.ended_at - s.started_at).total_seconds() // 60)|int }} min{% else %}—{%
+                    endif %}
+                </span>
+                <span class="session-row-count">{{ event_counts.get(s.id, 0) }} words</span>
+                <i class="fa-solid fa-chevron-right"></i>
+            </a>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-block">No completed sessions yet.</div>
+        {% endif %}
+    </div>
+</section>
+
+<script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

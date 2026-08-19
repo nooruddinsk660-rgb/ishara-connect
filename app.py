@@ -1,6 +1,11 @@
 import base64
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+from dotenv import load_dotenv
+load_dotenv()  # no-op if .env doesn't exist (e.g. on a platform that injects env vars directly)
+
 from flask import Flask, render_template, Response, jsonify, request
-from flask_socketio import SocketIO, emit
+from flask_socketio import emit
 import cv2
 import time
 import mediapipe as mp
@@ -11,14 +16,18 @@ import collections
 import json
 import sys
 import threading
+import datetime
 from utils import extract_keypoints
+from db import DB_ENABLED, SessionLocal, init_db, get_or_create_default_patient_user
+from models import Session as DBSession, TranscriptEvent, utcnow
+from emergency import check_emergency, create_alert
 
 # Add local site_packages to path
 sys.path.append(os.path.join(os.getcwd(), "site_packages"))
 
 # Robust import for gTTS
 try:
-    from gTTS import gTTS
+    from gtts import gTTS
 except ImportError:
     try:
         from gtts import gTTS
@@ -27,7 +36,17 @@ except ImportError:
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', os.urandom(32))
-socketio = SocketIO(app, cors_allowed_origins="*")
+# Stage 2: the dashboard uses real signed-cookie login sessions, so unlike
+# Phase 0 (where nothing depended on SECRET_KEY staying stable), a restart
+# with no SECRET_KEY set now logs every caregiver out. Set it in .env for
+# any deployment that isn't purely local/throwaway.
+app.config['PERMANENT_SESSION_LIFETIME'] = datetime.timedelta(hours=8)  # one shift
+
+from extensions import socketio
+socketio.init_app(app, cors_allowed_origins="*")
+
+from dashboard import dashboard_bp
+app.register_blueprint(dashboard_bp)
 
 # --- CONFIGURATION ---
 MODEL_FILE = "model.p"
@@ -60,6 +79,9 @@ try:
     print("✅ Model loaded successfully!")
 except Exception as e:
     print(f"❌ Error loading model: {e}")
+
+# --- STAGE 1: POSTGRES TRANSCRIPT LOGGING (optional, additive) ---
+init_db()
 
 # --- LOAD TRANSLATIONS ---
 translations = {}
@@ -121,6 +143,12 @@ def draw_robotic_hands(image, hand_landmarks):
         cv2.circle(image, (cx, cy), radius, COLOR_NEON_GREEN, -1)
         cv2.circle(image, (cx, cy), 2, COLOR_WHITE, -1)
 
+# LOCAL KIOSK MODE ONLY. This opens a webcam device attached directly to the
+# machine running this Flask process (cv2.VideoCapture(0)). It is unrelated to
+# the normal browser flow, which streams frames over Socket.IO instead (see
+# handle_frame() below) and works from any client. On a cloud host there is no
+# camera device 0, so this will just log "Could not open webcam" and return.
+# Gated off by default -- see ENABLE_LOCAL_WEBCAM_ROUTE below.
 def gen_frames():
     prediction_buffer = collections.deque(maxlen=PREDICTION_BUFFER_SIZE)
     current_prediction = "Nothing"
@@ -245,14 +273,40 @@ def handle_connect():
         'buffer': collections.deque(maxlen=PREDICTION_BUFFER_SIZE),
         'current_prediction': "Nothing",
         'last_sent_prediction': "Nothing",
-        'last_audio_time': 0
+        'last_audio_time': 0,
+        'db_session_id': None,
+        'institution_id': None,
     }
     print(f"🔌 Client Connected: {sid}")
+
+    if DB_ENABLED:
+        try:
+            db = SessionLocal()
+            user = get_or_create_default_patient_user(db)
+            db_session = DBSession(user_id=user.id, device_type='browser')
+            db.add(db_session)
+            db.commit()
+            user_sessions[sid]['db_session_id'] = db_session.id
+            user_sessions[sid]['institution_id'] = user.institution_id
+            db.close()
+        except Exception as e:
+            print(f"⚠️ [DB] Failed to open transcript session: {e}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     sid = request.sid
     if sid in user_sessions:
+        db_session_id = user_sessions[sid].get('db_session_id')
+        if DB_ENABLED and db_session_id:
+            try:
+                db = SessionLocal()
+                db_session = db.get(DBSession, db_session_id)
+                if db_session:
+                    db_session.ended_at = utcnow()
+                    db.commit()
+                db.close()
+            except Exception as e:
+                print(f"⚠️ [DB] Failed to close transcript session: {e}")
         del user_sessions[sid]
     print(f"🔌 Client Disconnected: {sid}")
 
@@ -329,11 +383,82 @@ def handle_video_frame(data):
                         session['current_prediction'] = new_pred
                         active_map, _ = get_active_map(current_lang, is_polite_mode)
                         sentence = active_map.get(session['current_prediction'], "")
+
+                        # Computed once here (not just inside the DB block below) so the
+                        # patient-facing UI can show real model confidence live, not just
+                        # the caregiver dashboard. new_pred != "Nothing" guarantees data_aux
+                        # was set above this call (raw_prediction only equals a real class
+                        # when that try block succeeded).
+                        confidence = None
+                        if new_pred != "Nothing" and hasattr(model, 'predict_proba'):
+                            confidence = float(model.predict_proba([data_aux])[0].max())
+
                         emit('prediction_update', {
                             'prediction': session['current_prediction'],
-                            'sentence': sentence
+                            'sentence': sentence,
+                            'confidence': confidence,
                         })
-                        
+
+                        # --- Stage 1: log this verified prediction as a transcript_event ---
+                        if DB_ENABLED and session.get('db_session_id') and new_pred != "Nothing":
+                            try:
+                                event_ts = utcnow()
+                                db = SessionLocal()
+                                db.add(TranscriptEvent(
+                                    session_id=session['db_session_id'],
+                                    ts=event_ts,
+                                    gesture_sequence=json.dumps(list(session['buffer'])),
+                                    decoded_phrase=new_pred,
+                                    confidence=confidence,
+                                    mode='word',
+                                ))
+                                db.commit()
+                                db.close()
+
+                                # Stage 2: push this to any caregiver dashboard watching this
+                                # institution's live feed. Server-picked room -- see dashboard.py's
+                                # handle_dashboard_join(), a client can never choose this room itself.
+                                if session.get('institution_id'):
+                                    socketio.emit('new_transcript_event', {
+                                        'session_id': session['db_session_id'],
+                                        'decoded_phrase': new_pred,
+                                        'confidence': confidence,
+                                        'ts': event_ts.isoformat(),
+                                    }, to=f"institution_{session['institution_id']}", namespace='/dashboard')
+
+                                # Stage 3: Emergency Detector. Short-circuits off the same
+                                # verified-prediction event as the transcript log above -- this
+                                # does not wait behind anything else in the conversational path.
+                                severity = check_emergency(new_pred)
+                                if severity:
+                                    db = SessionLocal()
+                                    alert = create_alert(db, session['db_session_id'], new_pred, severity)
+                                    alert_payload = {
+                                        'id': alert.id,
+                                        'session_id': alert.session_id,
+                                        'trigger_phrase': alert.trigger_phrase,
+                                        'severity': alert.severity,
+                                        'ts': alert.ts.isoformat(),
+                                    }
+                                    db.close()
+
+                                    if session.get('institution_id'):
+                                        socketio.emit('emergency_alert', alert_payload,
+                                                      to=f"institution_{session['institution_id']}",
+                                                      namespace='/dashboard')
+
+                                    # Confirm to the SIGNER's own screen, not broadcast -- this is
+                                    # `emit()` with no room, which Flask-SocketIO sends only to the
+                                    # requesting client. Fail loud, not silent (design principle #4):
+                                    # the patient should see that this was flagged, not just trust
+                                    # that somewhere, someone got a notification.
+                                    emit('emergency_confirmed', {
+                                        'trigger_phrase': new_pred,
+                                        'severity': severity,
+                                    })
+                            except Exception as e:
+                                print(f"⚠️ [DB] Failed to log transcript event: {e}")
+
         current_time = time.time()
         if session['current_prediction'] != "Nothing":
             if session['current_prediction'] != session['last_sent_prediction'] or (current_time - session['last_audio_time']) > AUDIO_COOLDOWN:
@@ -369,9 +494,15 @@ def handle_video_frame(data):
 def index():
     return render_template('index.html')
 
-@app.route('/video_feed')
-def video_feed():
-    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+@app.route('/favicon.ico')
+def favicon():
+    return ('', 204)
+
+
+if os.environ.get('ENABLE_LOCAL_WEBCAM_ROUTE', 'false').lower() == 'true':
+    @app.route('/video_feed')
+    def video_feed():
+        return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/log_event')
 def log_event():

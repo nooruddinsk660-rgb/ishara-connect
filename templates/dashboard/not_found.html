@@ -1,0 +1,10 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Not found — Ishara-Connect{% endblock %}
+{% block content %}
+<div class="notfound-block">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <h1>Session not found</h1>
+    <p>It doesn't exist, or it isn't part of your institution.</p>
+    <a href="{{ url_for('dashboard.home') }}">Back to dashboard</a>
+</div>
+{% endblock %}

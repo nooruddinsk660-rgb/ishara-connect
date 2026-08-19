@@ -1,29 +1,70 @@
+# ==========================================
+# Ishara Connect - Git Ignore Rules
+# ==========================================
 
-# Python
+# 1. Environment & Secret Keys
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# 2. Environments & Local Dependencies
+venv/
+.venv/
+env/
+ENV/
+site_packages/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# 3. Python Bytecode & Cache
 __pycache__/
 *.py[cod]
 *$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
 
-# Virtual Environment
-venv/
-env/
-site_packages/
-
-# Data & Models (Large Files)
+# 4. Large ML Models & Data Files
 model.p
+*.pkl
+*.p
+*.h5
+*.onnx
+*.tflite
 data.csv
 
-# OS generated files
+# 5. Pre-generated & Cached Audio Assets
+# (Ignore generated mp3s in static/audio, keep folder structure)
+static/audio/*/*.mp3
+!static/audio/**/.gitkeep
+
+# 6. Executables & Binaries
+*.exe
+ngrok.exe
+
+# 7. OS & System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 Desktop.ini
 
-# IDEs
+# 8. IDEs & Code Editors
 .vscode/
 .idea/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
 
-# Environment Variables
-.env
-
-# Binary executions
-*.exe
-ngrok.exe
+# 9. Logs & Databases
+*.log
+*.sqlite
+*.sqlite3
+*.db
