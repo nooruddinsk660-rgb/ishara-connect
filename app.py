@@ -17,6 +17,12 @@ import json
 import sys
 import threading
 import datetime
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from utils import extract_keypoints
 from db import DB_ENABLED, SessionLocal, init_db, get_or_create_default_patient_user
 from models import Session as DBSession, TranscriptEvent, utcnow

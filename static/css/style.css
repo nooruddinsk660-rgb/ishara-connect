@@ -175,6 +175,20 @@ header {
     box-shadow: none;
 }
 
+/* Real disconnected state -- was previously impossible to show since the
+   badge always just said "ACTIVE" regardless of the actual socket state. */
+.status-badge.is-down {
+    background: rgba(255, 71, 87, 0.1);
+    border-color: #ff4757;
+    box-shadow: 0 0 10px rgba(255, 71, 87, 0.35);
+}
+
+.status-badge.is-down .pulse-dot {
+    background: #ff4757;
+    box-shadow: 0 0 10px #ff4757;
+    animation: none;
+}
+
 .pulse-dot {
     width: 8px;
     height: 8px;
@@ -204,17 +218,28 @@ header {
 /* --- Main Layout --- */
 .main-container {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     flex: 1;
     padding: 20px 40px;
-    gap: 18px;
+    gap: 20px;
     overflow: hidden;
     position: relative;
+    min-height: 0;
+}
+
+.stage-col {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    flex: 3;
+    min-width: 0;
+    min-height: 0;
 }
 
 /* Glassmorphism Cards */
 .stage-card,
-.reply-card {
+.reply-card,
+.convo-card {
     background: var(--card-bg);
     backdrop-filter: var(--glass-blur);
     -webkit-backdrop-filter: var(--glass-blur);
@@ -224,19 +249,23 @@ header {
     transition: all 0.4s ease;
 }
 
-/* --- Stage card: the hero. The video feed is the most characteristic thing
-   in this product's world, so it fills the frame instead of sharing equal
-   billing with a text panel beside it. Recognition results are an overlay
-   on top of it, like a caption, not a competing box. --- */
+/* --- Stage card: the hero, but a real one -- fixed 4:3 aspect ratio rather
+   than however much space the flex layout leaves over. A short, wide strip
+   forces object-fit: cover to crop top/bottom of whatever the camera sends,
+   which is exactly where hands are relative to a face-level webcam. Getting
+   this shape right matters more than getting it "cinematic." --- */
 .stage-card {
-    flex: 1;
-    min-height: 0;
+    flex: none;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    max-height: 100%;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
     overflow: hidden;
+    background: #050505;
 }
 
 .stage-card::before {
@@ -258,7 +287,140 @@ header {
 #video_feed {
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    /* contain, not cover: the frame is never cropped, only letterboxed if the
+       camera's actual ratio doesn't match. Losing part of the picture in a
+       sign-language app means losing part of the sign -- not acceptable
+       regardless of how it affects the "fills the frame" look. */
+    object-fit: contain;
+}
+
+/* --- Conversation log: an actual bidirectional thread, not just the latest
+   word overwriting the previous one. Chat-bubble convention on purpose --
+   it's the correct, immediately legible pattern for "who said what, in
+   order," not a novel layout this specific screen needs to invent. --- */
+.convo-card {
+    flex: 2;
+    max-width: 380px;
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.convo-header {
+    padding: 20px 22px;
+    font-weight: 700;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid var(--card-border);
+    flex-shrink: 0;
+}
+
+.convo-header i {
+    color: var(--accent-secondary);
+}
+
+.convo-count {
+    margin-left: auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    border-radius: 20px;
+    padding: 2px 11px;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: monospace;
+}
+
+.convo-log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-height: 0;
+}
+
+.convo-log::-webkit-scrollbar {
+    width: 5px;
+}
+
+.convo-log::-webkit-scrollbar-thumb {
+    background: var(--card-border);
+    border-radius: 3px;
+}
+
+.convo-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+    padding: 40px 12px;
+    line-height: 1.6;
+    margin: auto;
+}
+
+.convo-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-width: 90%;
+    opacity: 0;
+    transform: translateY(6px);
+}
+
+.convo-entry-in {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.convo-you {
+    align-self: flex-end;
+    align-items: flex-end;
+}
+
+.convo-them {
+    align-self: flex-start;
+    align-items: flex-start;
+}
+
+.convo-role {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    font-weight: 600;
+    padding: 0 4px;
+}
+
+.convo-text {
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.convo-you .convo-text {
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: #04140a;
+    border-bottom-right-radius: 5px;
+    font-weight: 600;
+}
+
+.convo-them .convo-text {
+    background: var(--icon-bg);
+    border: 1px solid var(--card-border);
+    color: var(--text-main);
+    border-bottom-left-radius: 5px;
+}
+
+.convo-time {
+    font-size: 0.6rem;
+    color: var(--text-muted);
+    padding: 0 4px;
 }
 
 /* Viewfinder corner brackets -- the signature detail. Frames the feed like a
@@ -715,6 +877,60 @@ input:checked+.slider:before {
     color: #333;
 }
 
+/* --- Header control groups (were inline-styled before; now real classes) --- */
+.lang-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.lang-selector i {
+    color: var(--accent-primary);
+    font-size: 1.3rem;
+}
+
+.toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+#polite-text {
+    font-weight: 500;
+}
+
+/* One grouped pill instead of four loose icon buttons of equal visual
+   weight -- these are all "session utility" controls (sound/camera/theme/
+   flashlight), distinct from language/politeness which affect the actual
+   communication and so stay as their own separate elements. */
+.control-pill {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    backdrop-filter: blur(4px);
+}
+
+.control-pill .theme-toggle-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    background: transparent;
+    border-radius: 14px;
+    font-size: 1.05rem;
+    backdrop-filter: none;
+}
+
+.control-pill .theme-toggle-btn:hover {
+    transform: none;
+    box-shadow: none;
+}
+
 /* Flashlight Overlay */
 #flashlight-overlay {
     position: fixed;
@@ -1055,7 +1271,13 @@ input:checked+.slider:before {
     }
 
     .stage-card {
-        min-height: 340px;
+        max-height: 60vh;
+    }
+
+    .convo-card {
+        max-width: none;
+        height: 260px;
+        flex: none;
     }
 
     .reply-card {
@@ -1112,7 +1334,11 @@ input:checked+.slider:before {
     }
 
     .stage-card {
-        min-height: 300px;
+        max-height: 46vh;
+    }
+
+    .convo-card {
+        height: 220px;
     }
 
     .caption-bar {
@@ -1165,7 +1391,6 @@ input:checked+.slider:before {
     }
 
     .stage-card {
-        min-height: 260px;
         border-radius: 20px;
     }
 
@@ -1181,6 +1406,11 @@ input:checked+.slider:before {
     .reply-card {
         border-radius: 20px;
         padding: 14px 16px;
+    }
+
+    .convo-card {
+        border-radius: 20px;
+        height: 200px;
     }
 
     .caption-bar {
@@ -1231,7 +1461,8 @@ input:checked+.slider:before {
    ========================================================================== */
 
 .stage-card,
-.reply-card {
+.reply-card,
+.convo-card {
     transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.4s ease;
 }
 
@@ -1480,4 +1711,58 @@ input:checked+.slider:before {
         width: 88px;
         height: 88px;
     }
+}
+
+/* ==========================================================================
+   Camera/mic permission-blocked overlay -- created dynamically in
+   scripts.html's checkPermissions() catch handler. Previously fully
+   inline-styled; moved here for consistency with every other overlay.
+   ========================================================================== */
+.permission-blocked-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.92);
+    z-index: 10000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-direction: column;
+    text-align: center;
+    color: #fff;
+    padding: 20px;
+}
+
+.permission-blocked-overlay i {
+    font-size: 3.5rem;
+    color: #ff4757;
+    margin-bottom: 20px;
+}
+
+.permission-blocked-overlay h1 {
+    font-size: 1.7rem;
+    margin: 0 0 10px;
+}
+
+.permission-blocked-overlay p {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.75);
+    margin: 0 0 24px;
+    max-width: 360px;
+}
+
+.permission-blocked-overlay button {
+    padding: 12px 32px;
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: var(--font-heading);
+    border: none;
+    border-radius: 50px;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    color: #04140a;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.permission-blocked-overlay button:hover {
+    transform: translateY(-2px);
 }

@@ -6,7 +6,7 @@
     <div class="controls-group">
         <!-- Language Selector -->
         <div class="lang-selector">
-            <i class="fas fa-language" style="color: var(--accent-primary); font-size: 1.5rem;"></i>
+            <i class="fas fa-language"></i>
             <select id="language-select" class="neumorphic-select">
                 <option value="bengali">বাংলা (Bengali)</option>
                 <option value="hindi">हिन्दी (Hindi)</option>
@@ -15,37 +15,39 @@
         </div>
 
         <!-- Politeness Toggle -->
-        <div id="polite-wrapper" class="toggle-container"
-            style="display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 0.9rem;">
-            <span id="polite-text" style="font-weight: 500;">Polite</span>
+        <div id="polite-wrapper" class="toggle-container">
+            <span id="polite-text">Polite</span>
             <label class="switch">
                 <input type="checkbox" id="polite-toggle" onchange="togglePolite()">
                 <span class="slider round"></span>
             </label>
         </div>
 
-        <!-- Sound Toggle -->
-        <button id="sound-toggle" class="theme-toggle-btn" onclick="toggleSound()" title="Mute/Unmute Audio">
-            <i class="fas fa-volume-up"></i>
-        </button>
+        <!-- Device/display controls, grouped as one unit rather than four
+             loose icons of equal weight -- they're all "session utility"
+             controls, distinct from language/politeness which affect the
+             actual communication. -->
+        <div class="control-pill">
+            <button id="sound-toggle" class="theme-toggle-btn" onclick="toggleSound()" title="Mute/Unmute Audio">
+                <i class="fas fa-volume-up"></i>
+            </button>
+            <button id="camera-toggle" class="theme-toggle-btn" onclick="toggleCamera()" title="Turn Camera On/Off">
+                <i class="fas fa-video"></i>
+            </button>
+            <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
+                <i class="fas fa-sun" id="theme-icon"></i>
+            </button>
+            <button class="theme-toggle-btn" onclick="toggleFlashlight()" title="Flashlight">
+                <i class="fas fa-bolt"></i>
+            </button>
+        </div>
 
-        <!-- Camera Toggle -->
-        <button id="camera-toggle" class="theme-toggle-btn" onclick="toggleCamera()" title="Turn Camera On/Off">
-            <i class="fas fa-video"></i>
-        </button>
-
-        <!-- Theme Toggle -->
-        <button id="theme-toggle" class="theme-toggle-btn" onclick="toggleTheme()" title="Toggle Theme">
-            <i class="fas fa-sun" id="theme-icon"></i>
-        </button>
-
-        <!-- Flashlight -->
-        <button class="theme-toggle-btn" onclick="toggleFlashlight()" title="Flashlight" style="font-size: 1rem;">
-            <i class="fas fa-bolt"></i>
-        </button>
-
-        <div class="status-badge">
-            <div class="pulse-dot"></div> ACTIVE
+        <!-- Reflects the real Socket.IO connection state -- see scripts.html's
+             connect/disconnect handlers. Was previously a hardcoded "ACTIVE"
+             regardless of whether the server was actually reachable. -->
+        <div class="status-badge" id="status-badge">
+            <div class="pulse-dot" id="status-dot"></div>
+            <span id="status-text">CONNECTING</span>
         </div>
     </div>
 </header>

@@ -1,11 +1,10 @@
-<!-- Load Socket.IO from static asset (with CDN fallback) -->
+<!-- Load Socket.IO client library (Local static first, CDN fallback) -->
 <script src="{{ url_for('static', filename='js/socket.io.min.js') }}"></script>
 <script>
     if (typeof io === 'undefined') {
         document.write('<script src="https://cdn.socket.io/4.6.0/socket.io.min.js"><\/script>');
     }
 </script>
-
 
 <script>
     // --- Global States ---
@@ -141,6 +140,10 @@
 
                 // If we have a final transcript, we can "process" it here if needed
                 if (this.finalTranscript.trim() !== '') {
+                    // onend fires exactly once per listening session -- the
+                    // right place to log one conversation entry, vs. onresult
+                    // which can fire repeatedly while a phrase is still settling.
+                    addConvoEntry('them', this.finalTranscript.trim());
                     setTimeout(() => {
                         this.toggleOverlay(false);
                     }, 1500);
@@ -273,80 +276,92 @@
         if (langSelect) selectedLang = langSelect.value;
 
         // 1. Socket Init
-        socket = io();
+        if (typeof io !== 'undefined') {
+            socket = io();
 
-        socket.on('connect', () => {
-            console.log("⚡ Connected to Server via WebSockets");
-            emitSettings();
-        });
+            socket.on('connect', () => {
+                console.log("⚡ Connected to Server via WebSockets");
+                emitSettings();
+                setConnectionStatus('connected');
+            });
 
-        socket.on('disconnect', () => {
-            console.log("🔌 Disconnected");
-        });
+            socket.on('disconnect', () => {
+                console.log("🔌 Disconnected");
+                setConnectionStatus('disconnected');
+            });
 
-        socket.on('prediction_update', (data) => {
-            const predElement = document.getElementById('pred-text');
-            const sentElement = document.getElementById('sent-text');
-            const ringFill = document.getElementById('ring-fill');
-            const ringPct = document.getElementById('ring-pct');
+            socket.on('prediction_update', (data) => {
+                const predElement = document.getElementById('pred-text');
+                const sentElement = document.getElementById('sent-text');
+                const ringFill = document.getElementById('ring-fill');
+                const ringPct = document.getElementById('ring-pct');
 
-            if (data.prediction && data.prediction !== "Nothing") {
-                if (predElement) {
-                    predElement.innerText = data.prediction;
-                    // Retrigger the settle animation on every new word, even
-                    // back-to-back ones, rather than an abrupt text swap.
-                    predElement.classList.remove('pred-updated');
-                    void predElement.offsetWidth; // force reflow so the animation restarts
-                    predElement.classList.add('pred-updated');
-                }
-                if (sentElement) sentElement.innerText = data.sentence;
-
-                // Confidence ring -- real model.predict_proba() output, not a
-                // decorative animation. Same high/mid/low color language as
-                // the caregiver dashboard's feed.
-                if (ringFill && ringPct) {
-                    const circumference = 119.4;
-                    const conf = data.confidence;
-                    if (conf === null || conf === undefined) {
-                        ringFill.style.strokeDashoffset = String(circumference);
-                        ringPct.textContent = '';
-                        ringFill.classList.remove('conf-mid', 'conf-low');
-                    } else {
-                        ringFill.style.strokeDashoffset = String(circumference * (1 - conf));
-                        ringPct.textContent = Math.round(conf * 100) + '%';
-                        ringFill.classList.toggle('conf-mid', conf < 0.75 && conf >= 0.5);
-                        ringFill.classList.toggle('conf-low', conf < 0.5);
+                if (data.prediction && data.prediction !== "Nothing") {
+                    if (predElement) {
+                        predElement.innerText = data.prediction;
+                        // Retrigger the settle animation on every new word, even
+                        // back-to-back ones, rather than an abrupt text swap.
+                        predElement.classList.remove('pred-updated');
+                        void predElement.offsetWidth; // force reflow so the animation restarts
+                        predElement.classList.add('pred-updated');
                     }
+                    if (sentElement) sentElement.innerText = data.sentence;
+
+                    // Confidence ring -- real model.predict_proba() output, not a
+                    // decorative animation. Same high/mid/low color language as
+                    // the caregiver dashboard's feed.
+                    if (ringFill && ringPct) {
+                        const circumference = 119.4;
+                        const conf = data.confidence;
+                        if (conf === null || conf === undefined) {
+                            ringFill.style.strokeDashoffset = String(circumference);
+                            ringPct.textContent = '';
+                            ringFill.classList.remove('conf-mid', 'conf-low');
+                        } else {
+                            ringFill.style.strokeDashoffset = String(circumference * (1 - conf));
+                            ringPct.textContent = Math.round(conf * 100) + '%';
+                            ringFill.classList.toggle('conf-mid', conf < 0.75 && conf >= 0.5);
+                            ringFill.classList.toggle('conf-low', conf < 0.5);
+                        }
+                    }
+
+                    document.querySelectorAll('.gesture-icon').forEach(el => el.classList.remove('active'));
+                    const activeIcon = document.getElementById('icon-' + data.prediction);
+                    if (activeIcon) {
+                        activeIcon.classList.add('active');
+                        activeIcon.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }
+
+                    // Bidirectional conversation log -- this fires only on a genuine
+                    // new confirmed word (app.py's stabilization buffer already
+                    // gates that), so one log entry per real signed word, not spam.
+                    addConvoEntry('you', data.sentence || data.prediction);
                 }
+            });
 
-                document.querySelectorAll('.gesture-icon').forEach(el => el.classList.remove('active'));
-                const activeIcon = document.getElementById('icon-' + data.prediction);
-                if (activeIcon) {
-                    activeIcon.classList.add('active');
-                    activeIcon.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            socket.on('play_audio', (data) => {
+                if (data.audio_url) AppManager.playAudio(data.audio_url);
+            });
+
+            // Stage 3: Emergency Detector confirmation. "Fail loud, not silent" --
+            // the signer should see that this was flagged and sent, not just
+            // trust that a notification happened somewhere they can't see.
+            socket.on('emergency_confirmed', (data) => {
+                AppManager.showEmergencyConfirmation(data.trigger_phrase, data.severity);
+            });
+
+            // Backend returning drawn frames
+            socket.on('processed_frame', (data) => {
+                isFrameProcessing = false;
+                if (isCameraOn) {
+                    const img = document.getElementById('video_feed');
+                    if (img) img.src = data;
                 }
-            }
-        });
-
-        socket.on('play_audio', (data) => {
-            if (data.audio_url) AppManager.playAudio(data.audio_url);
-        });
-
-        // Stage 3: Emergency Detector confirmation. "Fail loud, not silent" --
-        // the signer should see that this was flagged and sent, not just
-        // trust that a notification happened somewhere they can't see.
-        socket.on('emergency_confirmed', (data) => {
-            AppManager.showEmergencyConfirmation(data.trigger_phrase, data.severity);
-        });
-
-        // Backend returning drawn frames
-        socket.on('processed_frame', (data) => {
-            isFrameProcessing = false;
-            if (isCameraOn) {
-                const img = document.getElementById('video_feed');
-                if (img) img.src = data;
-            }
-        });
+            });
+        } else {
+            console.error("❌ Socket.IO library failed to load");
+            setConnectionStatus('disconnected');
+        }
 
         // 2. Preload
         AppManager.preloadAudio();
@@ -367,7 +382,18 @@
     function checkPermissions() {
         // Explicitly request front-facing camera on mobile. 
         // Do NOT request audio here! The Web Speech API needs exclusive access to the mic on mobile.
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false })
+        // 4:3 ideal, not 16:9 -- a wide frame crops exactly the vertical range
+        // where hands are relative to a face-level webcam. Still just "ideal":
+        // the browser may not honor it exactly, which is why the CSS side
+        // (object-fit: contain) is the real guarantee, not this constraint.
+        navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: 'user',
+                width: { ideal: 1280 },
+                height: { ideal: 960 }
+            },
+            audio: false
+        })
             .then(stream => {
                 console.log("✅ Camera Access Granted (Mic will be requested on-demand)");
                 localStream = stream;
@@ -382,21 +408,13 @@
             .catch(err => {
                 console.error("❌ Permission Denied:", err);
                 const overlay = document.createElement('div');
+                overlay.className = 'permission-blocked-overlay';
                 overlay.innerHTML = `
-                <div style="position:fixed;top:0;left:0;width:100%;height:100%;
-                            background:rgba(0,0,0,0.9);z-index:10000;display:flex;
-                            justify-content:center;align-items:center;flex-direction:column;
-                            text-align:center;color:white;padding:20px;">
-                    <i class="fas fa-lock" style="font-size:4rem;color:#ff4757;margin-bottom:20px;"></i>
+                    <i class="fas fa-lock"></i>
                     <h1>Camera/Mic Access Blocked</h1>
-                    <p style="font-size:1.2rem;margin-bottom:20px;">Please allow camera and microphone access.</p>
-                    <button onclick="location.reload()" 
-                            style="padding:10px 30px;font-size:1.2rem;border:none;border-radius:50px;
-                                   background:var(--accent-primary);color:white;cursor:pointer;">
-                        Try Again
-                    </button>
-                </div>
-            `;
+                    <p>Please allow camera and microphone access.</p>
+                    <button onclick="location.reload()">Try Again</button>
+                `;
                 document.body.appendChild(overlay);
             });
     }
@@ -424,6 +442,7 @@
     }
 
     function emitSettings() {
+        if (!socket) return;
         const lang = document.getElementById('language-select')?.value || 'english';
         const polite = document.getElementById('polite-toggle')?.checked || false;
         socket.emit('update_settings', { lang: lang, polite: polite });
@@ -601,5 +620,66 @@
             ringFill.classList.remove('conf-mid', 'conf-low');
             ringPct.textContent = '✓';
         }
+
+        // A manual tap is just as much a real communication act as a
+        // recognized sign -- it belongs in the conversation log too.
+        addConvoEntry('you', gestureName);
+    }
+
+    // --- Real connection status, replacing the previous hardcoded "ACTIVE"
+    // badge. "Fail loud, not silent": if the socket drops, the signer should
+    // see that, not keep watching a badge that lied about it. ---
+    function setConnectionStatus(state) {
+        const badge = document.getElementById('status-badge');
+        const text = document.getElementById('status-text');
+        if (!badge || !text) return;
+        if (state === 'connected') {
+            badge.classList.remove('is-down');
+            text.textContent = 'ACTIVE';
+        } else {
+            badge.classList.add('is-down');
+            text.textContent = 'RECONNECTING';
+        }
+    }
+
+    // --- Conversation log: appends one entry to the bidirectional thread.
+    // role is 'you' (signed/tapped) or 'them' (spoken reply, via SpeechManager).
+    function addConvoEntry(role, text) {
+        if (!text || !text.trim()) return;
+        const log = document.getElementById('convo-log');
+        if (!log) return;
+
+        const empty = document.getElementById('convo-empty');
+        if (empty) empty.remove();
+
+        const entry = document.createElement('div');
+        entry.className = 'convo-entry convo-' + role;
+
+        const roleEl = document.createElement('span');
+        roleEl.className = 'convo-role';
+        roleEl.textContent = role === 'you' ? 'You' : 'Them';
+
+        const textEl = document.createElement('span');
+        textEl.className = 'convo-text';
+        textEl.textContent = text; // textContent, not innerHTML -- no injection risk from speech input
+
+        const timeEl = document.createElement('span');
+        timeEl.className = 'convo-time';
+        timeEl.textContent = new Date().toLocaleTimeString('en-GB', { hour12: false });
+
+        entry.appendChild(roleEl);
+        entry.appendChild(textEl);
+        entry.appendChild(timeEl);
+        log.appendChild(entry);
+        log.scrollTop = log.scrollHeight;
+
+        // Cap history so a long session doesn't grow the DOM without bound.
+        const entries = log.querySelectorAll('.convo-entry');
+        if (entries.length > 100) entries[0].remove();
+
+        const countEl = document.getElementById('convo-count');
+        if (countEl) countEl.textContent = String(log.querySelectorAll('.convo-entry').length);
+
+        requestAnimationFrame(() => entry.classList.add('convo-entry-in'));
     }
 </script>

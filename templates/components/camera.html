@@ -1,40 +1,55 @@
 <div class="main-container">
-    <div class="stage-card">
-        <!-- Captures local device camera, stays hidden -->
-        <video id="local_video" autoplay playsinline muted style="display:none;"></video>
-        <!-- Canvas used to encode frame to base64 -->
-        <canvas id="hidden_canvas" style="display:none;"></canvas>
-        <!-- Displays the ML processed stream emitted from Flask -->
-        <img id="video_feed" src="" alt="Webcam Feed">
+    <div class="stage-col">
+        <div class="stage-card">
+            <!-- Captures local device camera, stays hidden -->
+            <video id="local_video" autoplay playsinline muted style="display:none;"></video>
+            <!-- Canvas used to encode frame to base64 -->
+            <canvas id="hidden_canvas" style="display:none;"></canvas>
+            <!-- Displays the ML processed stream emitted from Flask. object-fit: contain --
+                 never crops. A sign-language app cropping the frame means losing the sign. -->
+            <img id="video_feed" src="" alt="Webcam Feed">
 
-        <div class="viewfinder" aria-hidden="true">
-            <span class="vf-corner vf-tl"></span>
-            <span class="vf-corner vf-tr"></span>
-            <span class="vf-corner vf-bl"></span>
-            <span class="vf-corner vf-br"></span>
+            <div class="viewfinder" aria-hidden="true">
+                <span class="vf-corner vf-tl"></span>
+                <span class="vf-corner vf-tr"></span>
+                <span class="vf-corner vf-bl"></span>
+                <span class="vf-corner vf-br"></span>
+            </div>
+
+            <div class="caption-bar" id="caption-bar">
+                <div class="confidence-ring" id="confidence-ring">
+                    <svg viewBox="0 0 44 44" aria-hidden="true">
+                        <circle class="ring-track" cx="22" cy="22" r="19"></circle>
+                        <circle class="ring-fill" id="ring-fill" cx="22" cy="22" r="19"></circle>
+                    </svg>
+                    <span class="ring-pct" id="ring-pct"></span>
+                </div>
+                <div class="caption-text">
+                    <div class="label-small">Detected Sign</div>
+                    <div id="pred-text">...</div>
+                    <div id="sent-text">Waiting for sign...</div>
+                </div>
+            </div>
         </div>
 
-        <div class="caption-bar" id="caption-bar">
-            <div class="confidence-ring" id="confidence-ring">
-                <svg viewBox="0 0 44 44" aria-hidden="true">
-                    <circle class="ring-track" cx="22" cy="22" r="19"></circle>
-                    <circle class="ring-fill" id="ring-fill" cx="22" cy="22" r="19"></circle>
-                </svg>
-                <span class="ring-pct" id="ring-pct"></span>
-            </div>
-            <div class="caption-text">
-                <div class="label-small">Detected Sign</div>
-                <div id="pred-text">...</div>
-                <div id="sent-text">Waiting for sign...</div>
-            </div>
+        <div class="reply-card">
+            <div class="reply-label"><i class="fas fa-reply"></i> Reply from the other person</div>
+            <button id="listen-btn" class="neumorphic-btn" onclick="toggleListening()">
+                <i class="fas fa-microphone"></i> &nbsp; Listen to Reply
+            </button>
+            <div id="incoming-text" class="incoming-text">Waiting for reply...</div>
         </div>
     </div>
 
-    <div class="reply-card">
-        <div class="reply-label"><i class="fas fa-reply"></i> Reply from the other person</div>
-        <button id="listen-btn" class="neumorphic-btn" onclick="toggleListening()">
-            <i class="fas fa-microphone"></i> &nbsp; Listen to Reply
-        </button>
-        <div id="incoming-text" class="incoming-text">Waiting for reply...</div>
+    <div class="convo-card">
+        <div class="convo-header">
+            <i class="fas fa-comments"></i> Conversation
+            <span class="convo-count" id="convo-count">0</span>
+        </div>
+        <div class="convo-log" id="convo-log">
+            <div class="convo-empty" id="convo-empty">
+                Signed words and spoken replies will appear here as the conversation happens.
+            </div>
+        </div>
     </div>
 </div>
