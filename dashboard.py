@@ -30,7 +30,6 @@ def inject_csrf_token():
     return dict(csrf_token=get_csrf_token())
 
 
-
 @dashboard_bp.before_request
 def _require_db():
     if not DB_ENABLED:
@@ -81,6 +80,7 @@ def home():
     db = SessionLocal()
     try:
         institution = db.get(Institution, user.institution_id)
+        window_start = utcnow() - datetime.timedelta(hours=24)
 
         active_sessions = (
             db.query(DBSession)
@@ -137,6 +137,69 @@ def home():
             .all()
         )
 
+        # Recently acknowledged (last 24h) -- an alert previously just vanished
+        # from the banner once acknowledged, with no trace anywhere on this
+        # page. This is the fix: read-only, so a caregiver coming on shift can
+        # still see what was already handled and by whom.
+        recent_acknowledged = (
+            db.query(Alert)
+            .join(DBSession, Alert.session_id == DBSession.id)
+            .join(User, DBSession.user_id == User.id)
+            .filter(User.institution_id == user.institution_id,
+                    Alert.acknowledged_at.isnot(None),
+                    Alert.acknowledged_at >= window_start)
+            .order_by(Alert.acknowledged_at.desc())
+            .limit(5)
+            .all()
+        )
+        acknowledger_ids = [a.acknowledged_by for a in recent_acknowledged if a.acknowledged_by]
+        acknowledger_names = {}
+        if acknowledger_ids:
+            for u in db.query(User).filter(User.id.in_(acknowledger_ids)).all():
+                acknowledger_names[u.id] = u.name or u.email
+
+        # --- Live stats bar: real numbers, not placeholders. Response-time is
+        # exactly the "time-to-first-response in an emergency" metric
+        # business_idea.pdf section 3.3 asks a real pilot to measure -- this
+        # makes it visible continuously instead of something computed by hand
+        # after the fact. ---
+        words_24h = (
+            db.query(func.count(TranscriptEvent.id))
+            .join(DBSession, TranscriptEvent.session_id == DBSession.id)
+            .join(User, DBSession.user_id == User.id)
+            .filter(User.institution_id == user.institution_id, TranscriptEvent.ts >= window_start)
+            .scalar()
+        ) or 0
+
+        alerts_24h = (
+            db.query(func.count(Alert.id))
+            .join(DBSession, Alert.session_id == DBSession.id)
+            .join(User, DBSession.user_id == User.id)
+            .filter(User.institution_id == user.institution_id, Alert.ts >= window_start)
+            .scalar()
+        ) or 0
+
+        acknowledged_24h = (
+            db.query(Alert.ts, Alert.acknowledged_at)
+            .join(DBSession, Alert.session_id == DBSession.id)
+            .join(User, DBSession.user_id == User.id)
+            .filter(User.institution_id == user.institution_id,
+                    Alert.acknowledged_at.isnot(None),
+                    Alert.ts >= window_start)
+            .all()
+        )
+        avg_response_seconds = None
+        if acknowledged_24h:
+            deltas = [(ack - ts).total_seconds() for ts, ack in acknowledged_24h]
+            avg_response_seconds = sum(deltas) / len(deltas)
+
+        stats = {
+            'words_24h': words_24h,
+            'alerts_24h': alerts_24h,
+            'active_now': len(active_sessions),
+            'avg_response_seconds': avg_response_seconds,
+        }
+
         return render_template(
             'dashboard/home.html',
             user=user, institution=institution,
@@ -144,6 +207,8 @@ def home():
             recent_events=recent_events, event_counts=event_counts,
             active_alerts=active_alerts, csrf_token=get_csrf_token(),
             emergency_triggers=EMERGENCY_TRIGGERS,
+            recent_acknowledged=recent_acknowledged, acknowledger_names=acknowledger_names,
+            stats=stats,
         )
     finally:
         db.close()

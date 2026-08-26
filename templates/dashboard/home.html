@@ -2,20 +2,72 @@
 {% block title %}Dashboard — Ishara-Connect{% endblock %}
 {% block content %}
 
+<section class="stats-bar">
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fa-solid fa-comment-dots"></i></div>
+        <div class="stat-body">
+            <span class="stat-value">{{ stats.words_24h }}</span>
+            <span class="stat-label">Words signed · 24h</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fa-solid fa-tower-broadcast"></i></div>
+        <div class="stat-body">
+            <span class="stat-value">{{ stats.active_now }}</span>
+            <span class="stat-label">Active now</span>
+        </div>
+    </div>
+    <div class="stat-card {{ 'stat-card-warn' if stats.alerts_24h > 0 else '' }}">
+        <div class="stat-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+        <div class="stat-body">
+            <span class="stat-value">{{ stats.alerts_24h }}</span>
+            <span class="stat-label">Alerts · 24h</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon"><i class="fa-solid fa-stopwatch"></i></div>
+        <div class="stat-body">
+            <span class="stat-value">
+                {%- if stats.avg_response_seconds is none -%}
+                    —
+                {%- elif stats.avg_response_seconds < 60 -%}
+                    {{ stats.avg_response_seconds|round|int }}s
+                {%- else -%}
+                    {{ (stats.avg_response_seconds / 60)|round(1) }}m
+                {%- endif -%}
+            </span>
+            <span class="stat-label">Avg. alert response</span>
+        </div>
+    </div>
+</section>
+
 <section id="alerts-banner" class="alerts-banner {{ 'has-alerts' if active_alerts else '' }}">
     {% for a in active_alerts %}
     <div class="alert-card sev-{{ a.severity }}" data-alert-id="{{ a.id }}">
         <div class="alert-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
         <div class="alert-body">
             <span class="alert-title">{{ a.severity|upper }} — "{{ a.trigger_phrase }}" signed</span>
-            <span class="alert-meta">{{ a.ts.strftime('%H:%M:%S') }} · <a
-                    href="{{ url_for('dashboard.session_detail', session_id=a.session_id) }}">Session #{{ a.session_id
-                    }}</a></span>
+            <span class="alert-meta">{{ a.ts.strftime('%H:%M:%S') }} · <a href="{{ url_for('dashboard.session_detail', session_id=a.session_id) }}">Session #{{ a.session_id }}</a></span>
         </div>
-        <button class="ack-btn" data-alert-id="{{ a.id }}"><i class="fa-solid fa-check"></i> Acknowledge</button>
+        <button class="ack-btn" data-alert-id="{{ a.id }}" aria-label="Acknowledge {{ a.severity }} alert for {{ a.trigger_phrase }}"><i class="fa-solid fa-check"></i> Acknowledge</button>
     </div>
     {% endfor %}
 </section>
+
+{% if recent_acknowledged %}
+<section class="recent-ack-list">
+    <div class="recent-ack-header"><i class="fa-solid fa-clock-rotate-left"></i> Recently handled <span class="recent-ack-window">last 24h</span></div>
+    {% for a in recent_acknowledged %}
+    <a class="recent-ack-row" href="{{ url_for('dashboard.session_detail', session_id=a.session_id) }}">
+        <span class="recent-ack-sev sev-dot-{{ a.severity }}" aria-hidden="true"></span>
+        <span class="recent-ack-phrase">&ldquo;{{ a.trigger_phrase }}&rdquo;</span>
+        <span class="recent-ack-by">{{ acknowledger_names.get(a.acknowledged_by, 'Someone') }}</span>
+        <span class="recent-ack-time">{{ a.acknowledged_at.strftime('%H:%M') }}</span>
+        <i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
+    </a>
+    {% endfor %}
+</section>
+{% endif %}
 
 <section class="monitor-panel">
     <div class="monitor-head">
@@ -27,12 +79,10 @@
     </div>
     <div class="monitor-feed" id="live-feed">
         {% for e in recent_events %}
-        <div class="feed-line{{ ' feed-line-trigger' if e.decoded_phrase in emergency_triggers else '' }}"
-            data-conf="{{ 'high' if e.confidence and e.confidence >= 0.75 else ('mid' if e.confidence and e.confidence >= 0.5 else 'low') }}">
+        <div class="feed-line{{ ' feed-line-trigger' if e.decoded_phrase in emergency_triggers else '' }}" data-conf="{{ 'high' if e.confidence and e.confidence >= 0.75 else ('mid' if e.confidence and e.confidence >= 0.5 else 'low') }}">
             <span class="feed-ts">{{ e.ts.strftime('%H:%M:%S') }}</span>
             <span class="feed-dot"></span>
-            <span class="feed-phrase">{{ e.decoded_phrase }}{% if e.decoded_phrase in emergency_triggers %} <i
-                    class="fa-solid fa-triangle-exclamation feed-trigger-icon"></i>{% endif %}</span>
+            <span class="feed-phrase">{{ e.decoded_phrase }}{% if e.decoded_phrase in emergency_triggers %} <i class="fa-solid fa-triangle-exclamation feed-trigger-icon"></i>{% endif %}</span>
             <span class="feed-conf">{{ '%.0f'|format(e.confidence * 100) if e.confidence is not none else '—' }}%</span>
         </div>
         {% else %}
@@ -43,8 +93,7 @@
 
 <section class="dash-grid">
     <div class="dash-col">
-        <h2 class="col-title"><i class="fa-solid fa-tower-broadcast"></i> Active now <span class="count-badge">{{
-                active_sessions|length }}</span></h2>
+        <h2 class="col-title"><i class="fa-solid fa-tower-broadcast"></i> Active now <span class="count-badge">{{ active_sessions|length }}</span></h2>
         {% if active_sessions %}
         <div class="session-cards">
             {% for s in active_sessions %}
@@ -52,8 +101,7 @@
                 <span class="pulse-dot-sm"></span>
                 <div class="session-card-body">
                     <span class="session-card-title">Session #{{ s.id }}</span>
-                    <span class="session-card-meta">Started {{ s.started_at.strftime('%H:%M:%S') }} · {{ s.device_type
-                        or 'unknown device' }}</span>
+                    <span class="session-card-meta">Started {{ s.started_at.strftime('%H:%M:%S') }} · {{ s.device_type or 'unknown device' }}</span>
                 </div>
                 <span class="session-card-count">{{ event_counts.get(s.id, 0) }} words</span>
             </a>
@@ -72,8 +120,7 @@
             <a class="session-row" href="{{ url_for('dashboard.session_detail', session_id=s.id) }}">
                 <span class="session-row-date">{{ s.started_at.strftime('%b %d, %H:%M') }}</span>
                 <span class="session-row-dur">
-                    {% if s.ended_at %}{{ ((s.ended_at - s.started_at).total_seconds() // 60)|int }} min{% else %}—{%
-                    endif %}
+                    {% if s.ended_at %}{{ ((s.ended_at - s.started_at).total_seconds() // 60)|int }} min{% else %}—{% endif %}
                 </span>
                 <span class="session-row-count">{{ event_counts.get(s.id, 0) }} words</span>
                 <i class="fa-solid fa-chevron-right"></i>

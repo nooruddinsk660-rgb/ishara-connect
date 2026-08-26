@@ -100,17 +100,96 @@ for lang in ['bengali', 'hindi', 'english']:
         translations[lang] = {"standard": {}, "polite": {}}
 
 # --- BACKGROUND AUDIO GENERATOR ---
-def generate_audio_background(text, lang_code, full_path, url):
-    """Generate audio in a separate thread and emit event when done."""
+def generate_audio_background(sid, text, lang_code, full_path, url):
+    """Generate audio in a separate thread and emit event when done.
+
+    sid=None only from the local-kiosk-mode gen_frames() route (no per-client
+    concept there -- see app.py's ENABLE_LOCAL_WEBCAM_ROUTE), where
+    broadcasting is correct since there's just one physical screen watching.
+    Every other caller should pass a real sid: without it, socketio.emit()
+    with no room broadcasts to every connected client, which means anyone
+    else with the page open would hear this audio too."""
     try:
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         tts = gTTS(text=text, lang=lang_code, slow=False)
         tts.save(full_path)
         print(f"✅ [BG] Audio Generated: {full_path}")
-        # Notify clients audio is ready
-        socketio.emit('play_audio', {'audio_url': url})
+        if sid:
+            socketio.emit('play_audio', {'audio_url': url}, to=sid, namespace='/')
+        else:
+            socketio.emit('play_audio', {'audio_url': url})
     except Exception as e:
         print(f"❌ [BG] TTS Error: {e}")
+
+def log_transcript_and_alert_background(sid, institution_id, db_session_id, new_pred, confidence, gesture_buffer):
+    """Runs the Postgres writes (and any resulting dashboard/emergency socket
+    pushes) in a background thread, off the video pipeline's critical path.
+
+    Before this, every confirmed word stalled processed_frame behind a
+    synchronous DB round-trip -- two round trips for an emergency word
+    (transcript_event, then alert) -- because the client won't capture its
+    next frame until processed_frame arrives (see startFrameStreaming()'s
+    isFrameProcessing gate in scripts.html). That's the difference between a
+    smooth feed and a visible hitch exactly at the moment a gesture is
+    recognized. Mirrors the generate_audio_background() pattern above."""
+    if not (DB_ENABLED and db_session_id):
+        return
+    try:
+        event_ts = utcnow()
+        db = SessionLocal()
+        db.add(TranscriptEvent(
+            session_id=db_session_id,
+            ts=event_ts,
+            gesture_sequence=json.dumps(gesture_buffer),
+            decoded_phrase=new_pred,
+            confidence=confidence,
+            mode='word',
+        ))
+        db.commit()
+        db.close()
+
+        # Stage 2: push this to any caregiver dashboard watching this
+        # institution's live feed. Server-picked room -- see dashboard.py's
+        # handle_dashboard_join(), a client can never choose this room itself.
+        if institution_id:
+            socketio.emit('new_transcript_event', {
+                'session_id': db_session_id,
+                'decoded_phrase': new_pred,
+                'confidence': confidence,
+                'ts': event_ts.isoformat(),
+            }, to=f"institution_{institution_id}", namespace='/dashboard')
+
+        # Stage 3: Emergency Detector. Still fires off the same verified-
+        # prediction event, just no longer blocking the frame that carries it.
+        severity = check_emergency(new_pred)
+        if severity:
+            db = SessionLocal()
+            alert = create_alert(db, db_session_id, new_pred, severity)
+            alert_payload = {
+                'id': alert.id,
+                'session_id': alert.session_id,
+                'trigger_phrase': alert.trigger_phrase,
+                'severity': alert.severity,
+                'ts': alert.ts.isoformat(),
+            }
+            db.close()
+
+            if institution_id:
+                socketio.emit('emergency_alert', alert_payload,
+                              to=f"institution_{institution_id}", namespace='/dashboard')
+
+            # Targets this ONE client via its own auto-joined sid room. Not a
+            # bare emit() -- that only works inside a live request context,
+            # which a background thread isn't -- and not a bare
+            # socketio.emit() with no room either, which would broadcast to
+            # every connected client (see generate_audio_background's fix
+            # above for the same class of bug).
+            socketio.emit('emergency_confirmed', {
+                'trigger_phrase': new_pred,
+                'severity': severity,
+            }, to=sid, namespace='/')
+    except Exception as e:
+        print(f"⚠️ [DB] Background logging failed: {e}")
 
 def get_active_map(lang='bengali', polite=False):
     t_type = "polite" if polite else "standard"
@@ -250,10 +329,12 @@ def gen_frames():
                     if os.path.exists(full_path):
                         socketio.emit('play_audio', {'audio_url': url})
                     else:
-                        # Generate in BACKGROUND to not block video
+                        # gen_frames() has no per-client sid (local kiosk mode,
+                        # see the ENABLE_LOCAL_WEBCAM_ROUTE gate) -- sid=None is
+                        # correct here, not an oversight.
                         active_map, lang_code = get_active_map(current_lang, is_polite_mode)
                         text = active_map.get(current_prediction, "")
-                        threading.Thread(target=generate_audio_background, args=(text, lang_code, full_path, url)).start()
+                        threading.Thread(target=generate_audio_background, args=(None, text, lang_code, full_path, url)).start()
             else:
                 last_sent_prediction = "Nothing"
 
@@ -324,9 +405,9 @@ def handle_settings(data):
         user_sessions[sid]['polite'] = data.get('polite', False)
         print(f"⚙️ Settings Updated for {sid}: {user_sessions[sid]['lang']}, Polite: {user_sessions[sid]['polite']}")
 
-# Create a global hands model configured for rapid websocket queries
+# Create a global hands model configured for rapid websocket queries (video tracking mode)
 socket_hands = mp_hands.Hands(
-    static_image_mode=True,
+    static_image_mode=False,
     model_complexity=0,
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5,
@@ -405,65 +486,17 @@ def handle_video_frame(data):
                             'confidence': confidence,
                         })
 
-                        # --- Stage 1: log this verified prediction as a transcript_event ---
-                        if DB_ENABLED and session.get('db_session_id') and new_pred != "Nothing":
-                            try:
-                                event_ts = utcnow()
-                                db = SessionLocal()
-                                db.add(TranscriptEvent(
-                                    session_id=session['db_session_id'],
-                                    ts=event_ts,
-                                    gesture_sequence=json.dumps(list(session['buffer'])),
-                                    decoded_phrase=new_pred,
-                                    confidence=confidence,
-                                    mode='word',
-                                ))
-                                db.commit()
-                                db.close()
-
-                                # Stage 2: push this to any caregiver dashboard watching this
-                                # institution's live feed. Server-picked room -- see dashboard.py's
-                                # handle_dashboard_join(), a client can never choose this room itself.
-                                if session.get('institution_id'):
-                                    socketio.emit('new_transcript_event', {
-                                        'session_id': session['db_session_id'],
-                                        'decoded_phrase': new_pred,
-                                        'confidence': confidence,
-                                        'ts': event_ts.isoformat(),
-                                    }, to=f"institution_{session['institution_id']}", namespace='/dashboard')
-
-                                # Stage 3: Emergency Detector. Short-circuits off the same
-                                # verified-prediction event as the transcript log above -- this
-                                # does not wait behind anything else in the conversational path.
-                                severity = check_emergency(new_pred)
-                                if severity:
-                                    db = SessionLocal()
-                                    alert = create_alert(db, session['db_session_id'], new_pred, severity)
-                                    alert_payload = {
-                                        'id': alert.id,
-                                        'session_id': alert.session_id,
-                                        'trigger_phrase': alert.trigger_phrase,
-                                        'severity': alert.severity,
-                                        'ts': alert.ts.isoformat(),
-                                    }
-                                    db.close()
-
-                                    if session.get('institution_id'):
-                                        socketio.emit('emergency_alert', alert_payload,
-                                                      to=f"institution_{session['institution_id']}",
-                                                      namespace='/dashboard')
-
-                                    # Confirm to the SIGNER's own screen, not broadcast -- this is
-                                    # `emit()` with no room, which Flask-SocketIO sends only to the
-                                    # requesting client. Fail loud, not silent (design principle #4):
-                                    # the patient should see that this was flagged, not just trust
-                                    # that somewhere, someone got a notification.
-                                    emit('emergency_confirmed', {
-                                        'trigger_phrase': new_pred,
-                                        'severity': severity,
-                                    })
-                            except Exception as e:
-                                print(f"⚠️ [DB] Failed to log transcript event: {e}")
+                        # --- Stage 1/2/3 logging + dashboard/emergency pushes now run in
+                        # the background (see log_transcript_and_alert_background above) so
+                        # a Postgres round-trip never stalls processed_frame -- and by
+                        # extension, the client's NEXT captured frame too, since it waits
+                        # for processed_frame before sending another one.
+                        if new_pred != "Nothing":
+                            threading.Thread(
+                                target=log_transcript_and_alert_background,
+                                args=(sid, session.get('institution_id'), session.get('db_session_id'),
+                                      new_pred, confidence, list(session['buffer']))
+                            ).start()
 
         current_time = time.time()
         if session['current_prediction'] != "Nothing":
@@ -485,11 +518,11 @@ def handle_video_frame(data):
                 else:
                     active_map, lang_code = get_active_map(current_lang, is_polite_mode)
                     text = active_map.get(session['current_prediction'], "")
-                    threading.Thread(target=generate_audio_background, args=(text, lang_code, full_path, url)).start()
+                    threading.Thread(target=generate_audio_background, args=(sid, text, lang_code, full_path, url)).start()
         else:
             session['last_sent_prediction'] = "Nothing"
             
-        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50]) 
+        _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 45]) 
         frame_bytes = base64.b64encode(buffer).decode('utf-8')
         emit('processed_frame', 'data:image/jpeg;base64,' + frame_bytes)
         

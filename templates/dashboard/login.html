@@ -12,22 +12,46 @@
         <div class="login-error"><i class="fa-solid fa-triangle-exclamation"></i> {{ error }}</div>
         {% endif %}
 
-        <form method="POST" class="login-form">
+        <form method="POST" class="login-form" id="login-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <label>
                 <span>Email</span>
-                <input type="email" name="email" required autofocus autocomplete="email"
-                    placeholder="you@institution.org">
+                <input type="email" name="email" required autofocus autocomplete="email" placeholder="you@institution.org">
             </label>
             <label>
                 <span>Password</span>
-                <input type="password" name="password" required autocomplete="current-password" placeholder="••••••••">
+                <div class="password-field">
+                    <input type="password" name="password" id="password-input" required autocomplete="current-password" placeholder="••••••••">
+                    <button type="button" class="password-toggle" onclick="togglePasswordVisibility()" aria-label="Show password">
+                        <i class="fa-solid fa-eye" id="password-toggle-icon"></i>
+                    </button>
+                </div>
             </label>
-            <button type="submit"><i class="fa-solid fa-right-to-bracket"></i> Sign in</button>
+            <button type="submit" id="login-submit"><i class="fa-solid fa-right-to-bracket"></i> <span id="login-submit-text">Sign in</span></button>
         </form>
 
-        <p class="login-footnote">Accounts are set up by your institution's Ishara-Connect administrator — there's no
-            self-signup yet.</p>
+        <p class="login-footnote">Accounts are set up by your institution's Ishara-Connect administrator — there's no self-signup yet.</p>
     </div>
 </div>
+<script>
+    function togglePasswordVisibility() {
+        const input = document.getElementById('password-input');
+        const icon = document.getElementById('password-toggle-icon');
+        const btn = icon.closest('button');
+        const showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        icon.className = showing ? 'fa-solid fa-eye' : 'fa-solid fa-eye-slash';
+        btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+    }
+
+    // Instant feedback on submit -- without this, a slow network makes the
+    // button look unresponsive for however long the request takes.
+    document.getElementById('login-form').addEventListener('submit', function () {
+        const btn = document.getElementById('login-submit');
+        const text = document.getElementById('login-submit-text');
+        btn.disabled = true;
+        btn.classList.add('is-loading');
+        text.textContent = 'Signing in…';
+    });
+</script>
 {% endblock %}

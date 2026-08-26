@@ -45,11 +45,17 @@ else:
 
 def init_db():
     """Create all tables if they don't exist yet. Safe to call on every startup."""
+    global DB_ENABLED
     if not DB_ENABLED:
         return
-    Base.metadata.create_all(engine)
-    print("Postgres tables ready: institutions, users, sessions, "
-          "transcript_events, alerts, model_versions.")
+    try:
+        Base.metadata.create_all(engine)
+        print("Postgres tables ready: institutions, users, sessions, "
+              "transcript_events, alerts, model_versions.")
+    except Exception as e:
+        print(f"⚠️ Warning: Could not connect to Postgres database ({e}). "
+              f"Running without transcript logging.")
+        DB_ENABLED = False
 
 
 DEFAULT_INSTITUTION_NAME = "Demo Institution (v1 placeholder)"

@@ -36,7 +36,9 @@
             </span>
         </div>
         {% if not a.acknowledged_at %}
-        <button class="ack-btn" data-alert-id="{{ a.id }}"><i class="fa-solid fa-check"></i> Acknowledge</button>
+        <button class="ack-btn" data-alert-id="{{ a.id }}"
+            aria-label="Acknowledge {{ a.severity }} alert for {{ a.trigger_phrase }}"><i class="fa-solid fa-check"></i>
+            Acknowledge</button>
         {% endif %}
     </div>
     {% endfor %}

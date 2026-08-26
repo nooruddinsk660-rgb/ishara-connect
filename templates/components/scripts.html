@@ -17,6 +17,7 @@
     let localStream = null;
     let cameraInterval = null;
     let isFrameProcessing = false;
+    let frameWatchdogTimer = null;
 
     // --- Audio Manager ---
     const AppManager = {
@@ -353,6 +354,10 @@
             // Backend returning drawn frames
             socket.on('processed_frame', (data) => {
                 isFrameProcessing = false;
+                if (frameWatchdogTimer) {
+                    clearTimeout(frameWatchdogTimer);
+                    frameWatchdogTimer = null;
+                }
                 if (isCameraOn) {
                     const img = document.getElementById('video_feed');
                     if (img) img.src = data;
@@ -382,15 +387,20 @@
     function checkPermissions() {
         // Explicitly request front-facing camera on mobile. 
         // Do NOT request audio here! The Web Speech API needs exclusive access to the mic on mobile.
-        // 4:3 ideal, not 16:9 -- a wide frame crops exactly the vertical range
-        // where hands are relative to a face-level webcam. Still just "ideal":
-        // the browser may not honor it exactly, which is why the CSS side
-        // (object-fit: contain) is the real guarantee, not this constraint.
+        // 4:3 ideal, kept modest on purpose: this whole frame gets base64-encoded,
+        // sent to the server, decoded, run through MediaPipe, re-encoded, and
+        // sent back -- every one of those steps costs roughly the pixel count.
+        // 1280x960 was the first fix (for the crop bug) but made every round
+        // trip ~4x more expensive than 640x480, which is the actual source of
+        // the lag. MediaPipe's hand model doesn't need more than this to work
+        // well -- it downsamples internally regardless of input size -- so this
+        // is close to a pure latency win with no real accuracy cost. Same 4:3
+        // ratio as before, so the crop fix (ratio + object-fit: contain) holds.
         navigator.mediaDevices.getUserMedia({
             video: {
                 facingMode: 'user',
-                width: { ideal: 1280 },
-                height: { ideal: 960 }
+                width: { ideal: 640 },
+                height: { ideal: 480 }
             },
             audio: false
         })
@@ -425,17 +435,34 @@
         if (!localVideo || !hiddenCanvas) return;
 
         const context = hiddenCanvas.getContext('2d');
+        const MAX_WIDTH = 640;
 
         // Process frames carefully to avoid network congestion
         cameraInterval = setInterval(() => {
             if (isCameraOn && socket && socket.connected && localVideo.readyState >= 2 && !isFrameProcessing) {
                 isFrameProcessing = true;
-                hiddenCanvas.width = localVideo.videoWidth;
-                hiddenCanvas.height = localVideo.videoHeight;
+
+                // Watchdog: auto-reset isFrameProcessing if server doesn't respond within 300ms
+                if (frameWatchdogTimer) clearTimeout(frameWatchdogTimer);
+                frameWatchdogTimer = setTimeout(() => {
+                    isFrameProcessing = false;
+                }, 300);
+
+                // Downscale resolution to max 640px width while preserving aspect ratio
+                const vW = localVideo.videoWidth || 640;
+                const vH = localVideo.videoHeight || 480;
+                const targetW = Math.min(vW, MAX_WIDTH);
+                const targetH = Math.round((vH / vW) * targetW);
+
+                if (hiddenCanvas.width !== targetW || hiddenCanvas.height !== targetH) {
+                    hiddenCanvas.width = targetW;
+                    hiddenCanvas.height = targetH;
+                }
+
                 context.drawImage(localVideo, 0, 0, hiddenCanvas.width, hiddenCanvas.height);
 
                 // Compress highly: speed > quality for ML coordinates
-                const dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.5);
+                const dataURL = hiddenCanvas.toDataURL('image/jpeg', 0.45);
                 socket.emit('video_frame', dataURL);
             }
         }, 80); // Send next frame roughly ~12fps max
