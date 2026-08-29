@@ -68,3 +68,11 @@ Desktop.ini
 *.sqlite
 *.sqlite3
 *.db
+
+# 10. Media Files & Avatar Assets
+*.mp4
+*.mov
+*.avi
+*.mkv
+static/avatar/*
+!static/avatar/.gitkeep

@@ -23,24 +23,53 @@ CLASSES_FULL = [
     "Book", "Tea", "Name", "Happy"
 ]
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--classes', nargs='*', default=[], help='Target classes to record (default: all)')
-parser.add_argument('--signer_id', type=str, required=True,
-                     help="Unique name/ID for whoever is signing in this run, e.g. 'noor', 'ankita'. "
-                          "REQUIRED -- this is what makes multi-signer data measurable instead of "
-                          "silently overwriting the previous person's recordings.")
+parser = argparse.ArgumentParser(description="Ishara-Connect Hand Gesture Data Collector")
+parser.add_argument('--classes', nargs='*', default=[], help='Target classes to record (default: all 30 classes)')
+parser.add_argument('--signer_id', type=str, default=None,
+                     help="Unique name/ID for whoever is signing in this run, e.g. 'noor', 'ankita'.")
 parser.add_argument('--session_note', type=str, default='unspecified',
-                     help="Free-text context for this recording run: lighting, camera, handedness, "
-                          "e.g. 'laptop-webcam-daylight-righthand'.")
+                     help="Free-text context for this recording run: lighting, camera, handedness.")
+parser.add_argument('--frames', type=int, default=500, help='Number of frames to record per class (default: 500)')
+parser.add_argument('--reset', action='store_true', help='Reset/clear existing data.csv and start completely fresh')
+parser.add_argument('--resume', action='store_true',
+                     help='Auto-resume from remaining unrecorded classes for this signer')
 args, _ = parser.parse_known_args()
 
+FRAMES_PER_CLASS = args.frames
 TARGET_CLASSES = args.classes
-CLASSES = TARGET_CLASSES if TARGET_CLASSES else CLASSES_FULL
+
+if args.reset and os.path.exists(DATA_FILE):
+    backup_file = f"data_backup_{int(time.time())}.csv"
+    os.rename(DATA_FILE, backup_file)
+    print(f"📦 Existing {DATA_FILE} backed up to {backup_file}")
+
 SIGNER_ID = args.signer_id
+if not SIGNER_ID:
+    try:
+        user_input = input("Enter Signer Name / ID (e.g. noor) [default: signer_1]: ").strip()
+        SIGNER_ID = user_input if user_input else "signer_1"
+    except (EOFError, KeyboardInterrupt):
+        SIGNER_ID = "signer_1"
+
 SESSION_NOTE = args.session_note
-# One session_id per run of this script -- every label recorded in this run shares it,
-# so train_model.py can later group-split by "one continuous take" instead of by frame.
 SESSION_ID = f"{SIGNER_ID}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+
+# Determine classes to record
+if TARGET_CLASSES:
+    CLASSES = TARGET_CLASSES
+elif args.resume and os.path.exists(DATA_FILE):
+    try:
+        df_existing = pd.read_csv(DATA_FILE)
+        if 'signer_id' in df_existing.columns:
+            done_labels = set(df_existing[df_existing['signer_id'] == SIGNER_ID]['label'].unique())
+        else:
+            done_labels = set(df_existing['label'].unique())
+        CLASSES = [c for c in CLASSES_FULL if c not in done_labels]
+        print(f"🔄 Resuming for signer '{SIGNER_ID}'. {len(done_labels)} already recorded. {len(CLASSES)} remaining classes.")
+    except Exception as e:
+        CLASSES = CLASSES_FULL
+else:
+    CLASSES = CLASSES_FULL
 
 META_COLS = ['label', 'signer_id', 'session_id', 'session_note']
 

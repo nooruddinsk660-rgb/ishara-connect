@@ -6,8 +6,14 @@
     }
 </script>
 
+<script id="avatar-replies-data" type="application/json">
+    {{ (avatar_replies if avatar_replies is defined else []) | tojson | safe }}
+</script>
+
 <script>
     // --- Global States ---
+    const avatarRepliesEl = document.getElementById('avatar-replies-data');
+    window.AVATAR_REPLIES = avatarRepliesEl ? JSON.parse(avatarRepliesEl.textContent || '[]') : [];
     let isPoliteMode = false;
     let isMuted = false;
     let isCameraOn = true;
@@ -107,6 +113,7 @@
         recognition: null,
         isListening: false,
         finalTranscript: '',
+        lastSpokenText: '',
 
         init: function () {
             if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -139,15 +146,21 @@
                 this.updateUI(false);
                 console.log("🎤 Mic Stopped");
 
-                // If we have a final transcript, we can "process" it here if needed
-                if (this.finalTranscript.trim() !== '') {
+                // If we have a transcript (final or last captured interim), process it
+                const text = (this.finalTranscript || this.lastSpokenText || '').trim();
+                if (text !== '') {
                     // onend fires exactly once per listening session -- the
-                    // right place to log one conversation entry, vs. onresult
-                    // which can fire repeatedly while a phrase is still settling.
-                    addConvoEntry('them', this.finalTranscript.trim());
+                    // right place to log one conversation entry
+                    addConvoEntry('them', text);
+
+                    // Cleanly close the speech listening overlay first
+                    this.toggleOverlay(false);
+
+                    // Sequential flow: Wait for speech session to fully finish and close,
+                    // then show and play the avatar sign translation
                     setTimeout(() => {
-                        this.toggleOverlay(false);
-                    }, 1500);
+                        tryAutoPlayAvatarReply(text);
+                    }, 350);
                 } else {
                     this.toggleOverlay(false);
                     const incomingDisplay = document.getElementById('incoming-text');
@@ -157,15 +170,18 @@
 
             this.recognition.onresult = (event) => {
                 let interimTranscript = '';
-                this.finalTranscript = '';
+                let finalPart = '';
 
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                for (let i = 0; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        this.finalTranscript += event.results[i][0].transcript;
+                        finalPart += event.results[i][0].transcript;
                     } else {
                         interimTranscript += event.results[i][0].transcript;
                     }
                 }
+
+                this.finalTranscript = finalPart.trim();
+                this.lastSpokenText = (this.finalTranscript || interimTranscript).trim();
 
                 // Update Overlay Text
                 const transcriptDisplay = document.getElementById('active-transcript');
@@ -178,12 +194,12 @@
 
                 // Update original Dashboard Text 
                 const incomingDisplay = document.getElementById('incoming-text');
-                if (incomingDisplay) {
+                if (incomingDisplay && this.lastSpokenText) {
                     incomingDisplay.style.setProperty('display', 'block', 'important');
-                    incomingDisplay.innerText = this.finalTranscript || interimTranscript;
+                    incomingDisplay.innerText = this.lastSpokenText;
                 }
 
-                console.log("🗣️ Speech:", this.finalTranscript || interimTranscript);
+                console.log("🗣️ Speech captured:", this.lastSpokenText);
             };
 
             this.recognition.onerror = (event) => {
@@ -208,7 +224,11 @@
             if (!this.recognition) return;
             if (this.isListening) return;
 
+            // Close any active avatar video so speaking and avatar never run simultaneously
+            closeAvatarPip();
+
             this.finalTranscript = ''; // Reset
+            this.lastSpokenText = ''; // Reset
 
             // Set Language Logic
             let micLang = 'en-US';
@@ -603,6 +623,177 @@
     // 7. Toggle Listening (Main Function)
     function toggleListening() {
         SpeechManager.toggleListening();
+    }
+
+    // 7b. "Show Sign" tab -- switches the reply panel between speech-to-text
+    // and pre-recorded real-signer avatar replies. Two panels, one active.
+    function switchReplyTab(which) {
+        const tabs = { listen: document.getElementById('tab-listen'), avatar: document.getElementById('tab-avatar') };
+        const panels = { listen: document.getElementById('panel-listen'), avatar: document.getElementById('panel-avatar') };
+        Object.keys(tabs).forEach((key) => {
+            const isActive = key === which;
+            tabs[key].classList.toggle('is-active', isActive);
+            tabs[key].setAttribute('aria-selected', isActive ? 'true' : 'false');
+            panels[key].hidden = !isActive;
+        });
+        // Leaving the avatar tab mid-playback shouldn't leave audio/video
+        // running invisibly in the background.
+        if (which !== 'avatar') {
+            const video = document.getElementById('avatar-video');
+            if (video && !video.paused) video.pause();
+        }
+    }
+
+    // 7c. Speech -> Avatar matching. Word-overlap scoring against each
+    // reply's trigger phrases (avatar_replies.py). Deliberately NOT an
+    // embedding/LLM-based matcher: with a fixed, closed set of known
+    // target phrases, a heavier model buys no real accuracy but adds real
+    // latency (a network round trip at minimum). This runs in microseconds,
+    // entirely client-side, off the transcript SpeechManager already has.
+    // If nothing matches confidently, this does nothing -- the existing
+    // raw-text behavior is exactly what the patient sees. Never force a
+    // match onto a wrong sign just because it was the closest of ten.
+    const AVATAR_MATCH_THRESHOLD = 0.5;
+    // Common function words carry no topic-specific meaning and cause false
+    // positives on short triggers -- e.g. without this, "can you tell me
+    // your date of birth" matched the "repeat" reply, because its trigger
+    // "can you repeat" shares "can"/"you" with almost any question. Filtered
+    // out of both sides before scoring, found and fixed via direct testing
+    // against adversarial phrases, not assumed correct.
+    const AVATAR_MATCH_STOP_WORDS = new Set([
+        'a', 'an', 'the', 'is', 'are', 'was', 'were', 'do', 'does', 'did', 'can', 'could',
+        'would', 'should', 'will', 'you', 'your', 'me', 'my', 'i', 'it', 'that', 'this',
+        'please', 'to', 'of', 'in', 'on', 'at', 'and', 'or', 'be', 'been', 'have', 'has',
+        'had', 'not', 'so', 'just', 'there', 'here',
+    ]);
+
+    function normalizeForMatch(s) {
+        return (s || '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function avatarMatchContentWords(s) {
+        return normalizeForMatch(s).split(' ').filter((w) => w && !AVATAR_MATCH_STOP_WORDS.has(w));
+    }
+
+    function triggerMatchScore(transcript, triggerPhrase) {
+        const normT = normalizeForMatch(transcript);
+        const normP = normalizeForMatch(triggerPhrase);
+        if (!normT || !normP) return 0;
+
+        // Exact match or full phrase containment gives high confidence
+        if (normT === normP) return 1.0;
+        if (normT.includes(normP) || normP.includes(normT)) return 0.9;
+
+        const tWords = new Set(avatarMatchContentWords(transcript));
+        const pWords = avatarMatchContentWords(triggerPhrase);
+        if (pWords.length === 0 || tWords.size === 0) return 0;
+        const matched = pWords.filter((w) => tWords.has(w)).length;
+        return matched / pWords.length; // fraction of the trigger phrase's meaningful words actually said
+    }
+
+    function findAvatarMatch(transcript) {
+        if (!window.AVATAR_REPLIES || !transcript) return null;
+        let bestKey = null;
+        let bestScore = 0;
+        window.AVATAR_REPLIES.forEach((reply) => {
+            (reply.triggers || []).forEach((trigger) => {
+                const score = triggerMatchScore(transcript, trigger);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestKey = reply.key;
+                }
+            });
+        });
+        console.log("🎯 Avatar Match Check for:", transcript, "-> Matched Key:", bestKey, "Score:", bestScore);
+        return bestScore >= AVATAR_MATCH_THRESHOLD ? bestKey : null;
+    }
+
+    // Called from SpeechManager.onend with the raw transcript (already
+    // logged to the conversation by that point). Returns true if it found
+    // and played a confident match, so the caller knows whether anything
+    // extra happened.
+    function tryAutoPlayAvatarReply(transcript) {
+        const key = findAvatarMatch(transcript);
+        if (!key) {
+            console.log("ℹ️ No avatar reply matched for transcript:", transcript);
+            return false;
+        }
+        const btn = document.querySelector(`.avatar-reply-btn[data-key="${key}"]`);
+        // Matched an intent, but no recording exists for it yet (see
+        // avatar_replies.py) -- do nothing rather than fail or play the
+        // wrong clip. The transcript is already shown as text either way.
+        if (!btn || btn.disabled) {
+            console.warn("⚠️ Avatar button disabled or not found for:", key);
+            return false;
+        }
+
+        console.log("🎬 Playing avatar reply for:", key);
+        switchReplyTab('avatar');
+        playAvatarReply(btn, { logEntry: false, autoReturnToListen: true });
+        return true;
+    }
+
+    function closeAvatarPip() {
+        const pip = document.getElementById('avatar-pip');
+        const video = document.getElementById('avatar-video');
+        if (video && !video.paused) video.pause();
+        if (pip) pip.classList.remove('is-active', 'is-playing');
+    }
+
+    // 7d. Play a pre-recorded avatar reply on the large HD stage PiP.
+    function playAvatarReply(btn, options = {}) {
+        // Stop any active mic listening session before starting avatar playback
+        if (SpeechManager.isListening) {
+            SpeechManager.stopListening();
+            SpeechManager.toggleOverlay(false);
+        }
+
+        const logEntry = options.logEntry !== false; // default true (manual taps log)
+        const autoReturnToListen = options.autoReturnToListen === true; // default false
+
+        const pip = document.getElementById('avatar-pip');
+        const video = document.getElementById('avatar-video');
+        const caption = document.getElementById('avatar-caption');
+        if (!video || !caption) return;
+
+        const label = btn.dataset.label;
+        const src = btn.dataset.video;
+        const poster = btn.dataset.poster;
+
+        document.querySelectorAll('.avatar-reply-btn').forEach((b) => b.classList.remove('is-active'));
+        btn.classList.add('is-active');
+        caption.textContent = label;
+
+        if (pip) pip.classList.add('is-active', 'is-playing');
+
+        if (video.getAttribute('src') !== src) {
+            video.src = src;
+            if (poster) video.poster = poster;
+            video.load();
+        }
+        video.muted = true;
+        video.playsInline = true;
+        video.currentTime = 0;
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+            playPromise.catch((e) => console.warn('⚠️ Avatar video playback blocked on mobile:', e));
+        }
+
+        // Logged the moment playback starts
+        if (logEntry) addConvoEntry('them', label);
+
+        video.onended = () => {
+            btn.classList.remove('is-active');
+            if (pip) pip.classList.remove('is-playing');
+            // Auto hide PiP after a brief pause so resting pose is seen clearly
+            setTimeout(() => {
+                if (pip && !pip.classList.contains('is-playing')) {
+                    pip.classList.remove('is-active');
+                }
+            }, 1800);
+
+            if (autoReturnToListen) switchReplyTab('listen');
+        };
     }
 
     // 8. Play Gesture (Manual)

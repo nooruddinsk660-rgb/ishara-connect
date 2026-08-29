@@ -27,6 +27,7 @@ from utils import extract_keypoints
 from db import DB_ENABLED, SessionLocal, init_db, get_or_create_default_patient_user
 from models import Session as DBSession, TranscriptEvent, utcnow
 from emergency import check_emergency, create_alert
+from avatar_replies import get_avatar_replies
 
 # Add local site_packages to path
 sys.path.append(os.path.join(os.getcwd(), "site_packages"))
@@ -531,7 +532,7 @@ def handle_video_frame(data):
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('index.html', avatar_replies=get_avatar_replies())
 
 @app.route('/favicon.ico')
 def favicon():
